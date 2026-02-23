@@ -1,0 +1,30 @@
+/* SentryOS Global Styles — Phase 1 baseline */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-bg: #0d0d0d;
+  --color-surface: #1a1a2e;
+  --color-accent: #00d4ff;
+  --color-text: #e0e0e0;
+  --color-muted: #6b7280;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}

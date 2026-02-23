@@ -1,0 +1,25 @@
+# ── Python ──────────────────────────────────────────────
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+
+# ── Node / Next.js ───────────────────────────────────────
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+frontend/.env.*
+
+# ── OS ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDEs ─────────────────────────────────────────────────
+.vscode/
+.idea/

@@ -1,0 +1,7 @@
+# SentryOS Backend — Python dependencies
+# Phase 1: API server + WebSocket transport only
+# Phase 2 additions (not yet): mediapipe, opencv-python, numpy
+
+fastapi
+uvicorn[standard]
+websockets
