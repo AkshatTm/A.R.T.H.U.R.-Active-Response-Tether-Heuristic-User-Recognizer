@@ -58,10 +58,8 @@
 | Route | File | Description |
 |-------|------|-------------|
 | `/` | `frontend/src/app/page.tsx` | Glassmorphism login: pre-filled email, simulated 800ms auth, sessionStorage persistence |
+| `/setup` | `frontend/src/app/setup/page.tsx` | BLE device pairing wizard |
 | `/dashboard` | `frontend/src/app/dashboard/page.tsx` | Master dashboard: auth guard + presentation override + security state + enterprise mock content |
-| `/test/bluetooth` | `frontend/src/app/test/bluetooth/page.tsx` | Isolated BLE hook state dump |
-| `/test/privacy` | `frontend/src/app/test/privacy/page.tsx` | Isolated WebSocket hook state dump |
-| `/test/chameleon` | `frontend/src/app/test/chameleon/page.tsx` | Color engine test harness with preset swatches, saturation guard panel, stress tests |
 
 ---
 

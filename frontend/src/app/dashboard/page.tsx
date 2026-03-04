@@ -26,7 +26,7 @@
 
 "use client";
 
-import { memo } from "react";
+import { memo, useCallback } from "react";
 import { AnimatePresence } from "framer-motion";
 import {
   Activity,
@@ -39,6 +39,7 @@ import {
   DollarSign,
   Eye,
   Globe,
+  LogOut,
   Radio,
   Server,
   Shield,
@@ -57,7 +58,9 @@ import { GlassOverlay } from "@/components/GlassOverlay";
 import { LockScreen } from "@/components/LockScreen";
 import { useSecurityState, type SecurityState } from "@/hooks/useSecurityState";
 import { PresentationModeProvider, usePresentationMode } from "@/context/PresentationModeContext";
-import { useAuthGuard } from "@/hooks/useAuthGuard";
+import { useAuthGuard, logout } from "@/hooks/useAuthGuard";
+import { useBleAutoLogout } from "@/hooks/useBleAutoLogout";
+import { useRouter } from "next/navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock Enterprise Data (module-level constants — stable, never re-created)
@@ -196,11 +199,12 @@ interface SecurityTopBarProps {
   deviceName: string | null;
   dominantColor: string | null;
   requestPairing: (namePrefix?: string) => Promise<void>;
+  onLogout: () => void;
 }
 
 const SecurityTopBar = memo(function SecurityTopBar({
   securityState, isConnected, faceCount, isDisconnected,
-  deviceName, dominantColor, requestPairing,
+  deviceName, dominantColor, requestPairing, onLogout,
 }: SecurityTopBarProps) {
   return (
     <header
@@ -291,6 +295,31 @@ const SecurityTopBar = memo(function SecurityTopBar({
             <span className="ml-1 max-w-[80px] truncate">{deviceName ?? "Tethered"}</span>
           </div>
         )}
+
+        {/* Sign Out button */}
+        <button
+          onClick={onLogout}
+          title="Sign Out"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer transition-colors duration-150"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            color: "var(--color-muted)",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.10)";
+            (e.currentTarget as HTMLButtonElement).style.color = "var(--color-danger)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.3)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.04)";
+            (e.currentTarget as HTMLButtonElement).style.color = "var(--color-muted)";
+            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.08)";
+          }}
+        >
+          <LogOut size={11} />
+          <span className="hidden sm:inline ml-1">Sign Out</span>
+        </button>
       </div>
     </header>
   );
@@ -558,6 +587,7 @@ const DashboardContent = memo(function DashboardContent({ isConnected, securityS
 function DashboardInner() {
   // Presentation override (null = sensors in control)
   const { overrideState, isOverrideActive } = usePresentationMode();
+  const router = useRouter();
 
   // Live sensor pipeline
   const {
@@ -569,6 +599,15 @@ function DashboardInner() {
 
   // Override wins when set by presenter keyboard shortcut; sensors resume on Ctrl+Shift+0
   const finalSecurityState = overrideState ?? securityState;
+
+  // BLE auto-logout watchdog (8 s grace period after disconnect)
+  const bleConnected = !isDisconnected;
+  const handleLogout = useCallback(() => {
+    fetch("http://localhost:8000/bluetooth/unpair", { method: "POST" }).catch(() => {});
+    logout(router);
+  }, [router]);
+
+  const { isGracePeriod, remainingSeconds } = useBleAutoLogout(bleConnected, handleLogout);
 
   return (
     <ChameleonWrapper dominantColor={dominantColor}>
@@ -583,6 +622,7 @@ function DashboardInner() {
           deviceName={deviceName}
           dominantColor={dominantColor}
           requestPairing={requestPairing}
+          onLogout={handleLogout}
         />
 
         {/* ── Presentation Mode indicator strip ── */}
@@ -624,6 +664,8 @@ function DashboardInner() {
               scan={scan}
               pair={pair}
               requestPairing={requestPairing}
+              isGracePeriod={isGracePeriod}
+              remainingSeconds={remainingSeconds}
             />
           )}
         </AnimatePresence>

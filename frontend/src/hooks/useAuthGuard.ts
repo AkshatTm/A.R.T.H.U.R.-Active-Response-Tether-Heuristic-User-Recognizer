@@ -1,23 +1,15 @@
 /**
  * useAuthGuard — Ephemeral Session Authentication Guard
  *
- * Checks sessionStorage for the 'sentry_auth' sentinel key on component mount.
- * If the key is absent (tab was fresh / never logged in), the user is
- * immediately redirected to the login page at /.
+ * Session keys:
+ *   sentry_auth       — set on successful password login
+ *   sentry_ble_paired — set after BLE device is confirmed on /setup
  *
- * Design rationale:
- * ─ sessionStorage is deliberately chosen over localStorage so the session
- *   clears automatically when the presenter closes the browser tab between
- *   demo runs. No manual logout required.
- * ─ There is no server-side token validation — this is a demo auth guard,
- *   not a production security boundary.
- * ─ `router.replace` is used (not `push`) so pressing the back button from
- *   /dashboard does not cycle back to a protected view.
+ * Guards:
+ *   useSetupGuard()   — requires only auth (used by /setup page)
+ *   useAuthGuard()    — requires both auth + BLE pairing (used by /dashboard)
  *
- * Usage:
- *   Call as the first hook in DashboardPage() before any rendering logic.
- *   The component will still mount briefly before the redirect fires, so
- *   ensure no sensitive data is rendered before this resolves.
+ * logout() clears both keys and redirects to /.
  */
 "use client";
 
@@ -25,18 +17,55 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 export const AUTH_SESSION_KEY = "sentry_auth" as const;
+export const BLE_SESSION_KEY = "sentry_ble_paired" as const;
 
+/**
+ * Clears both session keys and redirects to the login page.
+ * Accepts a router instance so it can be called from any component.
+ */
+export function logout(router: ReturnType<typeof useRouter>): void {
+  if (typeof window !== "undefined") {
+    sessionStorage.removeItem(AUTH_SESSION_KEY);
+    sessionStorage.removeItem(BLE_SESSION_KEY);
+  }
+  router.replace("/");
+}
+
+/**
+ * Guard for the /setup page — only requires the auth key.
+ * Redirects to / if the user hasn't logged in yet.
+ */
+export function useSetupGuard(): void {
+  const router = useRouter();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const isAuthenticated = sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
+    if (!isAuthenticated) {
+      router.replace("/");
+    }
+  }, [router]);
+}
+
+/**
+ * Guard for the /dashboard page — requires both auth and BLE pairing.
+ * Redirects to / if auth is missing, or to /setup if only BLE is missing.
+ */
 export function useAuthGuard(): void {
   const router = useRouter();
 
   useEffect(() => {
-    // Guard against SSR — sessionStorage is browser-only
     if (typeof window === "undefined") return;
 
     const isAuthenticated = sessionStorage.getItem(AUTH_SESSION_KEY) === "1";
+    const isBLEPaired = sessionStorage.getItem(BLE_SESSION_KEY) === "1";
 
     if (!isAuthenticated) {
       router.replace("/");
+      return;
+    }
+    if (!isBLEPaired) {
+      router.replace("/setup");
     }
   }, [router]);
 }

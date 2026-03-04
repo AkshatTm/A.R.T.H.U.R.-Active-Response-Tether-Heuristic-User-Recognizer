@@ -224,6 +224,13 @@ export default function LoginPage() {
       return;
     }
 
+    if (password !== "1234") {
+      setErrorMsg("Invalid passphrase.");
+      setPhase("error");
+      passwordRef.current?.focus();
+      return;
+    }
+
     setPhase("authenticating");
 
     // Simulated auth round-trip — 800ms to sell the narrative
@@ -234,7 +241,7 @@ export default function LoginPage() {
 
     // Brief success flash, then navigate
     await new Promise<void>((r) => setTimeout(r, 380));
-    router.push("/dashboard");
+    router.push("/setup");
   };
 
   return (

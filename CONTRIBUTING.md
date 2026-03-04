@@ -29,12 +29,13 @@
 SentryOS_Project/
 ├── backend/         # Python 3.10+ / FastAPI — AI engine
 ├── frontend/        # Next.js 14 / React 18 / TypeScript — UI
-└── docs/            # Documentation (Markdown)
+├── *.md             # Documentation (root-level Markdown files)
+└── README.md        # Project overview & quick start
 ```
 
 - **Backend changes** go in `backend/`
 - **Frontend changes** go in `frontend/src/`
-- **Documentation changes** go in `docs/` or root `README.md`
+- **Documentation changes** go in root-level `.md` files
 - Do not mix backend and frontend code in a single module
 
 ---

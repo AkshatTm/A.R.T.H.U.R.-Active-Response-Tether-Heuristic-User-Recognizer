@@ -56,6 +56,8 @@ SentryOS_Project/
 │   ├── vision_thread.py             # Camera loop, frame orchestrator, debug overlay
 │   ├── vision_tracker.py            # MediaPipe Face Detection wrapper
 │   ├── color_extractor.py           # ROI → MiniBatchKMeans → HEX
+│   ├── ble_tether.py                # BLE proximity tether service
+│   ├── ble_config.py                # BLE device config persistence
 │   ├── blaze_face_short_range.tflite # MediaPipe model artifact
 │   └── requirements.txt
 │
@@ -65,11 +67,8 @@ SentryOS_Project/
 │       │   ├── page.tsx                         # Login (glassmorphism, sessionStorage)
 │       │   ├── layout.tsx                       # Root layout
 │       │   ├── globals.css                      # Tailwind base + CSS variables
-│       │   ├── dashboard/page.tsx               # Master dashboard (auth + presentation)
-│       │   └── test/
-│       │       ├── bluetooth/page.tsx           # BLE hook diagnostic
-│       │       ├── privacy/page.tsx             # WebSocket hook diagnostic
-│       │       └── chameleon/page.tsx           # Color engine test harness
+│       │   ├── setup/page.tsx                   # BLE setup wizard
+│       │   └── dashboard/page.tsx               # Master dashboard (auth + presentation)
 │       ├── components/
 │       │   ├── ChameleonWrapper.tsx             # Motion Value → CSS variable bridge
 │       │   ├── GlassOverlay.tsx                 # Security filter (blur/grayscale)
@@ -80,11 +79,13 @@ SentryOS_Project/
 │       │   ├── useSecuritySocket.ts             # WebSocket client (ADR-01)
 │       │   ├── useProximityTether.ts            # Web Bluetooth lifecycle (ADR-02)
 │       │   ├── useSecurityState.ts              # State machine consolidator
+│       │   ├── useBleAutoLogout.ts              # BLE disconnect auto-logout
 │       │   └── useAuthGuard.ts                  # Session route guard
 │       └── types/
 │           └── bluetooth.d.ts                   # Web Bluetooth TS augmentations
 │
-└── docs/                            # Documentation
+├── *.md                             # Documentation (root-level)
+└── README.md                        # Project overview
 ```
 
 ### 2.2 Module Dependency Graph

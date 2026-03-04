@@ -127,10 +127,8 @@ The frontend starts at `http://localhost:3000`.
 | Path | Description |
 |------|-------------|
 | `/` | Login page (glassmorphism, session auth) |
+| `/setup` | BLE device pairing wizard |
 | `/dashboard` | Master integrated dashboard with all security subsystems |
-| `/test/bluetooth` | Isolated BLE proximity tether diagnostic |
-| `/test/privacy` | Isolated WebSocket + face detection diagnostic |
-| `/test/chameleon` | Chameleon color engine test harness |
 
 ## Demo Mode
 
@@ -153,14 +151,16 @@ SentryOS_Project/
 │   ├── vision_thread.py         # Camera capture loop, frame orchestrator
 │   ├── vision_tracker.py        # MediaPipe face detection wrapper
 │   ├── color_extractor.py       # ROI → K-Means → HEX color
+│   ├── ble_tether.py            # BLE proximity tether service
+│   ├── ble_config.py            # BLE device config persistence
 │   └── requirements.txt         # Python dependencies
 │
 ├── frontend/
 │   └── src/
 │       ├── app/
 │       │   ├── page.tsx              # Login page
-│       │   ├── dashboard/page.tsx    # Master dashboard
-│       │   └── test/                 # Isolated test routes
+│       │   ├── setup/page.tsx        # BLE setup wizard
+│       │   └── dashboard/page.tsx    # Master dashboard
 │       ├── components/
 │       │   ├── ChameleonWrapper.tsx   # CSS variable injection engine
 │       │   ├── GlassOverlay.tsx       # Security blur/lock filter
@@ -171,17 +171,16 @@ SentryOS_Project/
 │           ├── useSecuritySocket.ts   # WebSocket client
 │           ├── useProximityTether.ts  # Web Bluetooth lifecycle
 │           ├── useSecurityState.ts    # Security state machine
+│           ├── useBleAutoLogout.ts    # BLE disconnect auto-logout
 │           └── useAuthGuard.ts        # Session route guard
 │
-├── docs/                         # Project documentation
-│   ├── PRD.md                    # Product Requirements Document
-│   ├── Design.md                 # System Architecture & Design
-│   ├── TECH_STACK.md             # Technology Stack Reference
-│   ├── state.md                  # Project Status & Changelog
-│   ├── API_REFERENCE.md          # WebSocket & REST API Reference
-│   ├── SETUP_GUIDE.md            # Detailed Setup & Configuration
-│   └── CONTRIBUTING.md           # Contribution Guidelines
-│
+├── PRD.md                        # Product Requirements Document
+├── Design.md                     # System Architecture & Design
+├── TECH_STACK.md                 # Technology Stack Reference
+├── state.md                      # Project Status & Changelog
+├── API_REFERENCE.md              # WebSocket & REST API Reference
+├── SETUP_GUIDE.md                # Detailed Setup & Configuration
+├── CONTRIBUTING.md               # Contribution Guidelines
 └── README.md                     # This file
 ```
 
@@ -189,13 +188,13 @@ SentryOS_Project/
 
 | Document | Description |
 |----------|-------------|
-| [Product Requirements](docs/PRD.md) | Problem statement, feature specifications, acceptance criteria |
-| [Architecture & Design](docs/Design.md) | System design, concurrency model, state machine, data flow |
-| [Tech Stack](docs/TECH_STACK.md) | Technology choices with rationale |
-| [Project Status](docs/state.md) | Implementation status, changelog, known limitations |
-| [API Reference](docs/API_REFERENCE.md) | WebSocket protocol, REST endpoints, data contracts |
-| [Setup Guide](docs/SETUP_GUIDE.md) | Detailed installation, configuration, and troubleshooting |
-| [Contributing](docs/CONTRIBUTING.md) | Code standards, PR workflow, development guidelines |
+| [Product Requirements](PRD.md) | Problem statement, feature specifications, acceptance criteria |
+| [Architecture & Design](Design.md) | System design, concurrency model, state machine, data flow |
+| [Tech Stack](TECH_STACK.md) | Technology choices with rationale |
+| [Project Status](state.md) | Implementation status, changelog, known limitations |
+| [API Reference](API_REFERENCE.md) | WebSocket protocol, REST endpoints, data contracts |
+| [Setup Guide](SETUP_GUIDE.md) | Detailed installation, configuration, and troubleshooting |
+| [Contributing](CONTRIBUTING.md) | Code standards, PR workflow, development guidelines |
 
 ## Security Model
 

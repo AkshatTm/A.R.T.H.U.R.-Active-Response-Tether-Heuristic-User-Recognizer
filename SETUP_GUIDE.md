@@ -210,8 +210,8 @@ navigator.bluetooth
 
 ### 5.3 Pairing a Device
 
-1. Navigate to the Dashboard (`/dashboard`) or the Bluetooth test page (`/test/bluetooth`)
-2. Click the **Pair** button in the TopBar or test page
+1. Navigate to the Dashboard (`/dashboard`) or the Setup page (`/setup`)
+2. Click the **Pair** button in the TopBar or setup page
 3. Chrome will display the native Bluetooth pairing dialog
 4. Select your BLE device (smartwatch, earbuds, etc.)
 5. The device name and RSSI will appear in the TopBar
@@ -311,15 +311,15 @@ cd frontend
 npm run lint
 ```
 
-### 8.4 Test Routes
+### 8.4 Application Routes
 
-Use the isolated test routes during development to verify individual subsystems:
+The application has the following routes:
 
 | Route | Purpose |
 |-------|---------|
-| `/test/bluetooth` | Raw BLE hook state dump (RSSI, device name, connection status) |
-| `/test/privacy` | Raw WebSocket hook state dump (face count, color, connection) |
-| `/test/chameleon` | Color engine playground (manual injection, saturation guard, stress test) |
+| `/` | Login page (glassmorphism, session auth) |
+| `/setup` | BLE device pairing wizard |
+| `/dashboard` | Master dashboard with all security subsystems |
 
 ---
 

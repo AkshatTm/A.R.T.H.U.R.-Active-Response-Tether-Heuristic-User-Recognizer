@@ -84,6 +84,10 @@ export interface LockScreenProps {
    * Legacy compatibility — triggers scan().
    */
   requestPairing: (namePrefix?: string) => Promise<void>;
+  /** True while the 8-second auto-logout countdown is running. */
+  isGracePeriod?: boolean;
+  /** Seconds remaining in the grace period countdown. */
+  remainingSeconds?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -145,6 +149,8 @@ export function LockScreen({
   scan,
   pair,
   requestPairing,
+  isGracePeriod = false,
+  remainingSeconds = 0,
 }: LockScreenProps) {
   return (
     <motion.div
@@ -212,18 +218,55 @@ export function LockScreen({
           <h2 className="text-2xl font-semibold text-[var(--color-text)]">
             Hardware Tether Lost
           </h2>
-          <p
-            className="text-sm leading-relaxed mt-1"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            Your paired Bluetooth device has moved out of range.
-            <br />
-            This session will{" "}
-            <span className="text-[var(--color-text)] font-medium">
-              automatically restore
-            </span>{" "}
-            when the device returns within range.
-          </p>
+
+          {isGracePeriod ? (
+            <div className="flex flex-col items-center gap-2 mt-1">
+              <p
+                className="text-sm leading-relaxed"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Bring your paired device back within range.
+              </p>
+              <motion.div
+                key={remainingSeconds}
+                initial={{ scale: 1.15, opacity: 0.7 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ duration: 0.3 }}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl mt-1"
+                style={{
+                  background: "rgba(239,68,68,0.14)",
+                  border: "1px solid rgba(239,68,68,0.4)",
+                  boxShadow: "0 0 16px rgba(239,68,68,0.2)",
+                }}
+              >
+                <motion.span
+                  animate={{ opacity: [1, 0.4, 1] }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
+                  className="w-2 h-2 rounded-full"
+                  style={{ background: "var(--color-danger)", flexShrink: 0 }}
+                />
+                <span
+                  className="text-sm font-bold font-mono"
+                  style={{ color: "var(--color-danger)" }}
+                >
+                  Reconnect within {remainingSeconds}s or this session will end
+                </span>
+              </motion.div>
+            </div>
+          ) : (
+            <p
+              className="text-sm leading-relaxed mt-1"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Your paired Bluetooth device has moved out of range.
+              <br />
+              Bring your paired device back within range — this session will{" "}
+              <span className="text-[var(--color-text)] font-medium">
+                automatically restore
+              </span>{" "}
+              when the device returns.
+            </p>
+          )}
         </div>
 
         {/* ── RSSI signal meter ── */}
@@ -261,73 +304,6 @@ export function LockScreen({
             </span>
           </div>
         </div>
-
-        {/* ── Pair / Re-pair button ── */}
-        {isSupported && (deviceName === null || isDisconnected) && (
-          <div className="relative z-10 w-full space-y-2">
-            <button
-              onClick={() => scan()}
-              disabled={isPairing}
-              className="w-full py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
-              style={{
-                background: isPairing ? "rgba(239,68,68,0.06)" : "rgba(239,68,68,0.12)",
-                border: "1px solid rgba(239,68,68,0.3)",
-                color: "var(--color-danger)",
-                cursor: isPairing ? "wait" : "pointer",
-                opacity: isPairing ? 0.7 : 1,
-              }}
-              onMouseEnter={(e) => {
-                if (!isPairing) (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.22)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background =
-                  isPairing ? "rgba(239,68,68,0.06)" : "rgba(239,68,68,0.12)";
-              }}
-            >
-              <Bluetooth size={14} className="inline mr-2" />
-              {isPairing ? "Scanning…" : deviceName ? "Scan for Device" : "Scan for Bluetooth Devices"}
-            </button>
-
-            {/* ── Scanned device list ── */}
-            {availableDevices.length > 0 && (
-              <div
-                className="max-h-48 overflow-y-auto rounded-xl"
-                style={{
-                  background: "rgba(255,255,255,0.03)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                {availableDevices.map((dev) => (
-                  <button
-                    key={dev.address}
-                    onClick={() => pair(dev.address, dev.name, (dev as { type?: string }).type)}
-                    disabled={isPairing}
-                    className="w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/[0.04]"
-                    style={{
-                      borderBottom: "1px solid rgba(255,255,255,0.04)",
-                      cursor: isPairing ? "wait" : "pointer",
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <Bluetooth size={12} style={{ color: "var(--color-text-secondary)" }} />
-                      <span className="text-xs font-medium" style={{ color: "var(--color-text)" }}>
-                        {dev.name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>
-                        {dev.rssi} dBm
-                      </span>
-                      <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>
-                        {dev.address}
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
 
         {/* ── ADR-02 footnote ── */}
         <p
