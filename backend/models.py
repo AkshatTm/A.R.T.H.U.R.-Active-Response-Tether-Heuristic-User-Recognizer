@@ -34,7 +34,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field, asdict
-from typing import Literal
+from typing import Literal, Optional
 
 # ── Public Exports ──────────────────────────────────────────────────────────
 
@@ -87,6 +87,22 @@ class SensorPayload:
     dominant_color: str = "#1a1a2e"
     system_status: SystemStatus = "initializing"
     timestamp: float = field(default_factory=time.time)
+
+    # ── BLE Proximity Tether Fields ─────────────────────────────────
+    ble_connected: bool = False
+    """True when the paired BLE device is in range AND within the
+    unlock distance threshold.  False = session should LOCK."""
+
+    ble_rssi: Optional[int] = None
+    """Last smoothed RSSI reading (dBm) from the paired device.
+    None if no device is paired or no advertisement received."""
+
+    ble_distance_m: Optional[float] = None
+    """Estimated distance to the paired device in metres, calculated
+    via the Log-Distance Path Loss Model.  None if unavailable."""
+
+    ble_device_name: Optional[str] = None
+    """Human-readable name of the paired BLE device."""
 
     # -- Serialisation helpers ------------------------------------------------
 
@@ -165,6 +181,39 @@ class ThreadSafeState:
 
             # Always refresh the timestamp so the consumer can detect
             # stale data if the producer stops writing.
+            self._payload.timestamp = time.time()
+
+    # -- BLE Producer API (called by BLETetherService) ------------------------
+
+    def update_ble(
+        self,
+        *,
+        ble_connected: bool | None = None,
+        ble_rssi: int | None = None,
+        ble_distance_m: float | None = None,
+        ble_device_name: str | None = None,
+    ) -> None:
+        """Atomically update BLE proximity tether fields.
+
+        Parameters
+        ----------
+        ble_connected : bool, optional
+            Whether the BLE device is connected and within range.
+        ble_rssi : int | None, optional
+            Smoothed RSSI reading (dBm).
+        ble_distance_m : float | None, optional
+            Estimated distance in metres.
+        ble_device_name : str | None, optional
+            Human-readable device name.
+        """
+        with self._lock:
+            if ble_connected is not None:
+                self._payload.ble_connected = ble_connected
+            # Allow explicit None assignment for rssi/distance (device lost)
+            self._payload.ble_rssi = ble_rssi
+            self._payload.ble_distance_m = ble_distance_m
+            if ble_device_name is not None:
+                self._payload.ble_device_name = ble_device_name
             self._payload.timestamp = time.time()
 
     # -- Consumer API (called by WebSocket broadcaster) -----------------------

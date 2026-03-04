@@ -17,3 +17,6 @@ mediapipe>=0.10.0         # Google MediaPipe — CPU-optimized face detection
 opencv-python>=4.8.0      # Video capture + frame manipulation (ROI cropping)
 scikit-learn>=1.3.0       # MiniBatchKMeans for dominant color clustering
 numpy>=1.24.0             # Array ops bridging OpenCV ↔ scikit-learn
+
+# --- Bluetooth Low Energy (BLE) Proximity Tether ---
+bleak>=0.21.0             # Cross-platform async BLE scanner/client (Windows WinRT, macOS, Linux)

@@ -1,70 +1,76 @@
 /**
  * useProximityTether
  * ------------------
- * Manages the Web Bluetooth lifecycle to enforce a hardware proximity tether.
+ * Manages BLE proximity tethering via the Python backend REST API.
  *
- * Strategy:
- *  1. PRIMARY — `watchAdvertisements()` for real RSSI values (Chrome 91+).
- *  2. FALLBACK — GATT connection monitoring (binary connected / disconnected).
+ * The backend handles all Bluetooth operations (scan, pair, RSSI monitoring,
+ * distance calculation) using the Bleak library.  This hook simply:
+ *   1. Calls REST endpoints for scan/pair/unpair actions.
+ *   2. Reads BLE state from the WebSocket payload (pushed by the backend
+ *      at 10 Hz alongside camera data).
  *
  * Security model (ADR-02 — Fail-Closed):
- *  - `isDisconnected` defaults to `true` (LOCKED) until a device is paired
- *    and actively reporting RSSI above the threshold.
- *  - If the browser lacks `navigator.bluetooth`, the session stays LOCKED.
+ *  - `isDisconnected` defaults to `true` (LOCKED) until the backend
+ *    reports `ble_connected: true` via the WebSocket.
  *  - Set `NEXT_PUBLIC_BLE_BYPASS=true` to disable the tether for dev/demos.
  *
- * Constraints:
- *  - `requestPairing()` MUST be called from a user gesture (click / tap).
- *    The Web Bluetooth spec forbids programmatic invocation.
- *  - React 18 Strict Mode safe (isMountedRef guard on all async paths).
+ * User experience:
+ *  - First-time: user scans and selects their phone from a list.
+ *  - The backend persists the device MAC to `ble_config.json`.
+ *  - On subsequent launches, the backend auto-connects — no user action needed.
+ *  - No browser permission prompts, no requestDevice() dialogs.
  *
  * @module hooks/useProximityTether
  */
 
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
+export interface BLEDevice {
+  name: string;
+  address: string;
+  rssi: number;
+  type: "classic" | "ble";
+}
+
 export interface ProximityState {
-  /** True when the paired device is absent / out of range — UI should LOCK (ADR-02). */
+  /** True when the paired device is absent / out of range — UI should LOCK. */
   isDisconnected: boolean;
-  /** False if the browser lacks Web Bluetooth support entirely. */
+  /** Always true — backend BLE is always "supported" (no browser requirement). */
   isSupported: boolean;
   /** Human-readable name of the paired device, or null if none paired. */
   deviceName: string | null;
   /** Last known RSSI value (dBm), or null if unavailable. */
   rssi: number | null;
+  /** Estimated distance to the paired device in metres, or null. */
+  distance: number | null;
   /** Human-readable status for debugging / HUD display. */
   statusMessage: string;
+  /** Always false — backend handles everything, no GATT fallback needed. */
+  isGattOnly: boolean;
+  /** True while a scan or pair operation is in progress. */
+  isPairing: boolean;
+  /** List of devices found during the last scan. */
+  availableDevices: BLEDevice[];
+  /** Trigger a BLE scan via the backend. */
+  scan: () => Promise<void>;
+  /** Pair with a specific device by MAC address and type. */
+  pair: (mac: string, name?: string, deviceType?: string) => Promise<void>;
+  /** Unpair the current device. */
+  unpair: () => Promise<void>;
   /**
-   * Trigger BLE device pairing via the browser picker.
-   * **Must** be called from a user gesture (click / tap).
-   * No-op if Bluetooth is unsupported.
-   *
-   * @param namePrefix — Optional prefix to filter devices by name
-   *   (e.g. "boAt" for boAt earbuds). If provided, only devices whose
-   *   advertised name starts with this string appear in the picker.
-   *   If no device matches, the picker will show an error — the user
-   *   can retry without a prefix by leaving the field empty.
+   * Legacy API compatibility — calls scan() internally.
+   * Kept so existing UI code (LockScreen, SecurityTopBar) doesn't break.
    */
   requestPairing: (namePrefix?: string) => Promise<void>;
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-/**
- * RSSI threshold (dBm). Values below this indicate the device is out of
- * proximity (~2 m for most BLE radios).
- */
-const RSSI_THRESHOLD = -70;
-
-/**
- * If no BLE advertisement is received within this window (ms), the device
- * is considered out of range and `isDisconnected` flips to `true`.
- */
-const RSSI_STALE_MS = 10_000;
+const API_BASE = "http://localhost:8000";
 
 // ── Hook ───────────────────────────────────────────────────────────────────
 
@@ -73,269 +79,117 @@ export function useProximityTether(): ProximityState {
   const isBypassed = process.env.NEXT_PUBLIC_BLE_BYPASS === "true";
 
   // ── State ────────────────────────────────────────────────────────────
-  const [isDisconnected, setIsDisconnected] = useState(() => !isBypassed);
-  const [isSupported, setIsSupported] = useState(true); // assume true during SSR
-  const [deviceName, setDeviceName] = useState<string | null>(null);
-  const [rssi, setRssi] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState("Initializing…");
+  const [isPairing, setIsPairing] = useState(false);
+  const [availableDevices, setAvailableDevices] = useState<BLEDevice[]>([]);
+  const [statusMessage, setStatusMessage] = useState("Waiting for backend BLE data…");
 
-  // ── Refs (stable across renders) ─────────────────────────────────────
-  const deviceRef = useRef<BluetoothDevice | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const staleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gattHandlerRef = useRef<((e: Event) => void) | null>(null);
-  const isMountedRef = useRef(false);
+  // ── BLE state is now driven by the WebSocket payload via useSecuritySocket.
+  // These values are passed through useSecurityState. The hook no longer
+  // manages connection state itself — it only handles scan/pair/unpair actions.
 
-  // ── Helpers ──────────────────────────────────────────────────────────
+  // ── Actions ──────────────────────────────────────────────────────────
 
-  /** Tear down all BLE subscriptions, timers, and GATT connections. */
-  const teardownDevice = useCallback(() => {
-    // 1. Abort advertisement watching (AbortController)
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
-
-    // 2. Clear RSSI staleness timer
-    if (staleTimerRef.current) {
-      clearTimeout(staleTimerRef.current);
-      staleTimerRef.current = null;
-    }
-
-    // 3. Clean up the BluetoothDevice object
-    const device = deviceRef.current;
-    if (device) {
-      // Spec-draft cleanup (may not exist on all browsers)
-      device.unwatchAdvertisements?.();
-
-      // Remove GATT disconnect listener
-      if (gattHandlerRef.current) {
-        device.removeEventListener(
-          "gattserverdisconnected",
-          gattHandlerRef.current
-        );
-        gattHandlerRef.current = null;
-      }
-
-      // Disconnect GATT server
-      if (device.gatt?.connected) {
-        device.gatt.disconnect();
-      }
-
-      deviceRef.current = null;
-    }
-  }, []);
-
-  /** (Re)start the RSSI staleness timer. Marks disconnected if no advertisement arrives in time. */
-  const resetStaleTimer = useCallback(() => {
-    if (staleTimerRef.current) {
-      clearTimeout(staleTimerRef.current);
-    }
-    staleTimerRef.current = setTimeout(() => {
-      if (!isMountedRef.current) return;
-      setIsDisconnected(true);
-      setRssi(null);
-      setStatusMessage("BLE signal lost (no advertisement received).");
-    }, RSSI_STALE_MS);
-  }, []);
-
-  // ── GATT Fallback Strategy ──────────────────────────────────────────
-
-  /**
-   * Binary connected / disconnected monitoring via GATT.
-   * Used when `watchAdvertisements()` is unsupported or throws.
-   */
-  const startGattFallback = useCallback((device: BluetoothDevice) => {
-    const disconnectHandler = () => {
-      if (!isMountedRef.current) return;
-      setIsDisconnected(true);
-      setRssi(null);
-      setStatusMessage("Device disconnected (GATT server lost).");
-    };
-
-    gattHandlerRef.current = disconnectHandler;
-    device.addEventListener("gattserverdisconnected", disconnectHandler);
-
-    if (device.gatt) {
-      setStatusMessage("Connecting via GATT…");
-      device.gatt
-        .connect()
-        .then(() => {
-          if (!isMountedRef.current) return;
-          setIsDisconnected(false);
-          setStatusMessage("Tethered via GATT connection (no RSSI).");
-        })
-        .catch((err: Error) => {
-          if (!isMountedRef.current) return;
-          setIsDisconnected(true); // fail-closed
-          setStatusMessage(`GATT connect failed: ${err.message}`);
-        });
-    } else {
-      // Device paired but GATT unavailable — treat as present, monitor events
-      setIsDisconnected(false);
-      setStatusMessage("Device paired (GATT unavailable). Monitoring events.");
-    }
-  }, []);
-
-  // ── Advertisement Watching (Primary Strategy) ───────────────────────
-
-  /**
-   * Uses the experimental `watchAdvertisements()` API to receive real
-   * RSSI values from the paired device. Falls back to GATT on failure.
-   */
-  const startWatchingAds = useCallback(
-    (device: BluetoothDevice) => {
-      const abort = new AbortController();
-      abortRef.current = abort;
-
-      const handler = (event: Event) => {
-        if (!isMountedRef.current) return;
-        const advEvent = event as BluetoothAdvertisingEvent;
-        const rssiValue = advEvent.rssi ?? null;
-        setRssi(rssiValue);
-        resetStaleTimer();
-
-        if (rssiValue !== null) {
-          const outOfRange = rssiValue < RSSI_THRESHOLD;
-          setIsDisconnected(outOfRange);
-          setStatusMessage(
-            outOfRange
-              ? `Out of range (RSSI: ${rssiValue} dBm < ${RSSI_THRESHOLD} dBm)`
-              : `Tethered (RSSI: ${rssiValue} dBm)`
-          );
-        }
-      };
-
-      device.addEventListener("advertisementreceived", handler);
-
-      device
-        .watchAdvertisements({ signal: abort.signal })
-        .then(() => {
-          if (!isMountedRef.current) return;
-          setIsDisconnected(false);
-          setStatusMessage("Watching BLE advertisements…");
-          resetStaleTimer();
-        })
-        .catch((err: Error) => {
-          if (!isMountedRef.current) return;
-          console.warn(
-            "[useProximityTether] watchAdvertisements() failed, falling back to GATT:",
-            err.message
-          );
-          // Clean up the advertisement listener before falling back
-          device.removeEventListener("advertisementreceived", handler);
-          startGattFallback(device);
-        });
-    },
-    [resetStaleTimer, startGattFallback]
-  );
-
-  // ── Public API: requestPairing ──────────────────────────────────────
-
-  const requestPairing = useCallback(async (namePrefix?: string) => {
-    // Runtime support check (SSR-safe)
-    if (typeof navigator === "undefined" || !("bluetooth" in navigator)) {
-      setStatusMessage("Bluetooth unsupported in this browser.");
-      return;
-    }
-    if (!isMountedRef.current) return;
-
-    // Tear down any previously paired device
-    teardownDevice();
-    setRssi(null);
-    setDeviceName(null);
-    setIsDisconnected(true); // fail-closed during pairing flow
-
+  const scan = useCallback(async () => {
+    setIsPairing(true);
+    setStatusMessage("Scanning for devices…");
     try {
-      const trimmed = namePrefix?.trim();
-      setStatusMessage(
-        trimmed
-          ? `Requesting BLE device with name starting "${trimmed}"…`
-          : "Requesting BLE device (all devices)…"
-      );
-
-      // When a namePrefix is provided, use filters so the browser picker
-      // only lists matching devices (much easier to find your earbuds).
-      const requestOptions: RequestDeviceOptions = trimmed
-        ? {
-            filters: [{ namePrefix: trimmed }],
-            optionalServices: ["battery_service"],
-          }
-        : {
-            acceptAllDevices: true,
-            optionalServices: ["battery_service"],
-          };
-
-      const device = await navigator.bluetooth.requestDevice(requestOptions);
-
-      if (!isMountedRef.current) return;
-
-      deviceRef.current = device;
-      setDeviceName(device.name ?? `BLE-${device.id.slice(0, 8)}`);
-
-      // Primary strategy: watchAdvertisements for RSSI values
-      if (typeof device.watchAdvertisements === "function") {
-        startWatchingAds(device);
-      } else {
-        // Fallback: binary GATT connection monitoring
-        startGattFallback(device);
-      }
+      const res = await fetch(`${API_BASE}/bluetooth/scan`);
+      if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
+      const data = await res.json();
+      setAvailableDevices(data.devices ?? []);
+      setStatusMessage(`Found ${data.devices?.length ?? 0} devices`);
     } catch (err) {
-      if (!isMountedRef.current) return;
-      const error = err as Error;
-
-      if (error.name === "NotFoundError") {
-        // User cancelled the Bluetooth picker dialog
-        setStatusMessage("Device pairing cancelled by user.");
-      } else {
-        setStatusMessage(`BLE error: ${error.message}`);
-        console.error("[useProximityTether] requestDevice failed:", error);
-      }
+      console.error("[useProximityTether] Scan error:", err);
+      setStatusMessage("Scan failed — is the backend running?");
+      setAvailableDevices([]);
+    } finally {
+      setIsPairing(false);
     }
-  }, [teardownDevice, startWatchingAds, startGattFallback]);
+  }, []);
 
-  // ── Lifecycle ────────────────────────────────────────────────────────
-
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    // Detect browser support (navigator is unavailable during SSR)
-    const supported =
-      typeof navigator !== "undefined" && "bluetooth" in navigator;
-    setIsSupported(supported);
-
-    if (isBypassed) {
-      setIsDisconnected(false);
-      setStatusMessage(
-        "BLE bypass active (NEXT_PUBLIC_BLE_BYPASS=true). Tether disabled."
-      );
-    } else if (!supported) {
-      setIsDisconnected(true);
-      setStatusMessage(
-        "Bluetooth unsupported — session locked (ADR-02 fail-closed)."
-      );
-    } else {
-      // Fail-closed: locked until the user explicitly pairs a device
-      setIsDisconnected(true);
-      setStatusMessage(
-        "Bluetooth available. Pair a device to enable proximity tether."
-      );
+  const pair = useCallback(async (mac: string, name?: string, deviceType?: string) => {
+    setIsPairing(true);
+    setStatusMessage(`Pairing with ${name ?? mac}…`);
+    try {
+      const res = await fetch(`${API_BASE}/bluetooth/pair`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mac, name, device_type: deviceType ?? "classic" }),
+      });
+      if (!res.ok) throw new Error(`Pair failed: ${res.status}`);
+      const data = await res.json();
+      setStatusMessage(data.message ?? "Paired successfully");
+      setAvailableDevices([]); // Clear scan results after pairing
+    } catch (err) {
+      console.error("[useProximityTether] Pair error:", err);
+      setStatusMessage("Pairing failed — check backend logs");
+    } finally {
+      setIsPairing(false);
     }
+  }, []);
 
-    return () => {
-      isMountedRef.current = false;
-      teardownDevice();
+  const unpair = useCallback(async () => {
+    setIsPairing(true);
+    setStatusMessage("Unpairing…");
+    try {
+      const res = await fetch(`${API_BASE}/bluetooth/unpair`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(`Unpair failed: ${res.status}`);
+      setStatusMessage("Device unpaired");
+      setAvailableDevices([]);
+    } catch (err) {
+      console.error("[useProximityTether] Unpair error:", err);
+      setStatusMessage("Unpair failed");
+    } finally {
+      setIsPairing(false);
+    }
+  }, []);
+
+  /** Legacy compatibility — triggers a scan (replaces browser requestDevice). */
+  const requestPairing = useCallback(async (_namePrefix?: string) => {
+    await scan();
+  }, [scan]);
+
+  // ── Bypass mode ──────────────────────────────────────────────────────
+
+  if (isBypassed) {
+    return {
+      isDisconnected: false,
+      isSupported: true,
+      deviceName: "BLE Bypassed",
+      rssi: null,
+      distance: null,
+      statusMessage: "BLE bypass active (NEXT_PUBLIC_BLE_BYPASS=true)",
+      isGattOnly: false,
+      isPairing: false,
+      availableDevices: [],
+      scan: async () => {},
+      pair: async () => {},
+      unpair: async () => {},
+      requestPairing: async () => {},
     };
-  }, [isBypassed, teardownDevice]);
+  }
 
   // ── Return ───────────────────────────────────────────────────────────
+  // NOTE: isDisconnected, deviceName, rssi, distance are now sourced from
+  // the WebSocket payload in useSecurityState — NOT from this hook.
+  // This hook returns placeholder values that get overridden by the
+  // WebSocket-driven state in useSecurityState.
 
   return {
-    isDisconnected,
-    isSupported,
-    deviceName,
-    rssi,
+    isDisconnected: true, // Default: locked until WebSocket says otherwise
+    isSupported: true,
+    deviceName: null,
+    rssi: null,
+    distance: null,
     statusMessage,
+    isGattOnly: false,
+    isPairing,
+    availableDevices,
+    scan,
+    pair,
+    unpair,
     requestPairing,
   };
 }

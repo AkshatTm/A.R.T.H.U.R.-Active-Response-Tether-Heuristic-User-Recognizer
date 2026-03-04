@@ -1,37 +1,65 @@
 /**
  * bluetooth.d.ts
  * --------------
- * Ambient type augmentations for the Web Bluetooth API.
+ * Type declarations for the BLE proximity tether system.
  *
- * The `@types/web-bluetooth` package provides full type coverage for:
- *   - navigator.bluetooth.requestDevice()
- *   - BluetoothDevice (watchAdvertisements, gatt, forget, etc.)
- *   - BluetoothAdvertisingEvent (rssi, txPower, manufacturerData, etc.)
- *   - BluetoothRemoteGATTServer (connect, disconnect, getPrimaryService)
- *   - WatchAdvertisementsOptions ({ signal?: AbortSignal })
+ * BLE operations are now handled entirely by the Python backend using
+ * the Bleak library.  The frontend only interacts with BLE through:
+ *   1. REST endpoints (scan, pair, unpair, status)
+ *   2. WebSocket payload fields (ble_connected, ble_rssi, etc.)
  *
- * This file exists solely as a safety net for edge-case experimental
- * members that may be absent from the published type package, and to
- * re-export the reference so `tsc` always resolves Bluetooth types
- * regardless of `lib` or `typeRoots` configuration.
- *
- * @see https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API
- * @see https://www.npmjs.com/package/@types/web-bluetooth
+ * No Web Bluetooth API types are needed since the browser no longer
+ * manages Bluetooth directly.
  */
 
-/// <reference types="web-bluetooth" />
+/** A Bluetooth device discovered during a backend scan. */
+interface ScannedBLEDevice {
+  /** Human-readable device name. */
+  name: string;
+  /** Bluetooth MAC address (e.g. "AA:BB:CC:DD:EE:FF"). */
+  address: string;
+  /** Signal strength in dBm at time of discovery. */
+  rssi: number;
+  /** Device type: "classic" for paired audio devices, "ble" for BLE-only. */
+  type: "classic" | "ble";
+}
 
-/**
- * Augment BluetoothDevice with `unwatchAdvertisements()` which is present
- * in the spec draft but missing from @types/web-bluetooth as of v0.0.21.
- * This method is the cleanup counterpart to watchAdvertisements().
- *
- * @see https://webbluetoothcg.github.io/web-bluetooth/#dom-bluetoothdevice-unwatchadvertisements
- */
-interface BluetoothDevice {
-  /**
-   * Stops watching for advertisements from this device.
-   * Safe to call even if not currently watching — it will no-op.
-   */
-  unwatchAdvertisements?(): void;
+/** Response from GET /bluetooth/scan */
+interface BLEScanResponse {
+  devices: ScannedBLEDevice[];
+}
+
+/** Request body for POST /bluetooth/pair */
+interface BLEPairRequest {
+  mac: string;
+  name?: string;
+  device_type?: "classic" | "ble";
+}
+
+/** Response from POST /bluetooth/pair */
+interface BLEPairResponse {
+  success: boolean;
+  message: string;
+  device?: {
+    mac: string;
+    name: string;
+  };
+}
+
+/** Response from GET /bluetooth/status */
+interface BLEStatusResponse {
+  connected: boolean;
+  rssi: number | null;
+  distance_m: number | null;
+  device_name: string | null;
+  is_locked: boolean;
+  paired_mac: string | null;
+  device_type: string | null;
+  monitoring: boolean;
+}
+
+/** Response from POST /bluetooth/unpair */
+interface BLEUnpairResponse {
+  success: boolean;
+  message: string;
 }

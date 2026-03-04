@@ -64,13 +64,26 @@ export interface LockScreenProps {
   deviceName: string | null;
   /** Last RSSI reading in dBm. Null if no advertising packet received. */
   rssi: number | null;
-  /** Whether navigator.bluetooth is even available in this browser. */
+  /** Estimated distance from paired device in metres. Null if unavailable. */
+  distance: number | null;
+  /** Always true when using backend BLE. */
   isSupported: boolean;
+  /** Whether the BLE device is currently disconnected / out of range. */
+  isDisconnected: boolean;
+  /** Always false when using backend BLE. */
+  isGattOnly: boolean;
+  /** True while a scan or pair operation is in progress. */
+  isPairing: boolean;
+  /** Devices found during the last scan. */
+  availableDevices: { name: string; address: string; rssi: number; type?: string }[];
+  /** Trigger a BLE scan via backend. */
+  scan: () => Promise<void>;
+  /** Pair with a device by MAC address. */
+  pair: (mac: string, name?: string, deviceType?: string) => Promise<void>;
   /**
-   * Triggers navigator.bluetooth.requestDevice().
-   * Shown as a fallback if the browser doesn't auto-reconnect.
+   * Legacy compatibility — triggers scan().
    */
-  requestPairing: () => Promise<void>;
+  requestPairing: (namePrefix?: string) => Promise<void>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -79,7 +92,14 @@ export interface LockScreenProps {
  * Maps RSSI dBm to a human-readable proximity label.
  * The useProximityTether threshold is –70 dBm (approx. 2 m).
  */
-function rssiToProximityLabel(rssi: number): string {
+function rssiToProximityLabel(rssi: number, distance: number | null): string {
+  if (distance !== null) {
+    if (distance < 0.5) return `Very Close (${distance.toFixed(1)} m)`;
+    if (distance < 1.5) return `Near (${distance.toFixed(1)} m)`;
+    if (distance < 2.5) return `Borderline (${distance.toFixed(1)} m)`;
+    return `Out of Range (${distance.toFixed(1)} m)`;
+  }
+  // Fallback to RSSI-only labels if distance unavailable
   if (rssi >= -55) return "Very Close (< 0.5 m)";
   if (rssi >= -65) return "Near (< 1.5 m)";
   if (rssi >= -75) return "Borderline (~2 m)";
@@ -116,7 +136,14 @@ function SignalBars({ rssi }: { rssi: number | null }) {
 export function LockScreen({
   deviceName,
   rssi,
+  distance,
   isSupported,
+  isDisconnected,
+  isGattOnly,
+  isPairing,
+  availableDevices,
+  scan,
+  pair,
   requestPairing,
 }: LockScreenProps) {
   return (
@@ -208,7 +235,9 @@ export function LockScreen({
           }}
         >
           <div className="flex items-center gap-2.5">
-            {rssi !== null ? (
+            {isGattOnly && !isDisconnected ? (
+              <Bluetooth size={15} style={{ color: "var(--color-warning)" }} />
+            ) : rssi !== null ? (
               <Signal size={15} style={{ color: "var(--color-danger)" }} />
             ) : (
               <BluetoothOff size={15} style={{ color: "var(--color-danger)" }} />
@@ -224,36 +253,80 @@ export function LockScreen({
           <div className="flex items-center gap-3">
             <SignalBars rssi={rssi} />
             <span className="text-xs font-mono" style={{ color: "var(--color-muted)" }}>
-              {rssi !== null
-                ? `${rssi} dBm · ${rssiToProximityLabel(rssi)}`
-                : "No signal"}
+              {isGattOnly && !isDisconnected
+                ? "Connected (no proximity data)"
+                : rssi !== null
+                  ? `${rssi} dBm · ${rssiToProximityLabel(rssi, distance)}`
+                  : "No signal"}
             </span>
           </div>
         </div>
 
-        {/* ── Pair button (fallback if no device is paired at all) ── */}
-        {isSupported && deviceName === null && (
-          <button
-            onClick={requestPairing}
-            className="relative z-10 w-full py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
-            style={{
-              background: "rgba(239,68,68,0.12)",
-              border: "1px solid rgba(239,68,68,0.3)",
-              color: "var(--color-danger)",
-              cursor: "pointer",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "rgba(239,68,68,0.22)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background =
-                "rgba(239,68,68,0.12)";
-            }}
-          >
-            <Bluetooth size={14} className="inline mr-2" />
-            Pair a Bluetooth Device
-          </button>
+        {/* ── Pair / Re-pair button ── */}
+        {isSupported && (deviceName === null || isDisconnected) && (
+          <div className="relative z-10 w-full space-y-2">
+            <button
+              onClick={() => scan()}
+              disabled={isPairing}
+              className="w-full py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
+              style={{
+                background: isPairing ? "rgba(239,68,68,0.06)" : "rgba(239,68,68,0.12)",
+                border: "1px solid rgba(239,68,68,0.3)",
+                color: "var(--color-danger)",
+                cursor: isPairing ? "wait" : "pointer",
+                opacity: isPairing ? 0.7 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (!isPairing) (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.22)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  isPairing ? "rgba(239,68,68,0.06)" : "rgba(239,68,68,0.12)";
+              }}
+            >
+              <Bluetooth size={14} className="inline mr-2" />
+              {isPairing ? "Scanning…" : deviceName ? "Scan for Device" : "Scan for Bluetooth Devices"}
+            </button>
+
+            {/* ── Scanned device list ── */}
+            {availableDevices.length > 0 && (
+              <div
+                className="max-h-48 overflow-y-auto rounded-xl"
+                style={{
+                  background: "rgba(255,255,255,0.03)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                {availableDevices.map((dev) => (
+                  <button
+                    key={dev.address}
+                    onClick={() => pair(dev.address, dev.name, (dev as { type?: string }).type)}
+                    disabled={isPairing}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors duration-150 hover:bg-white/[0.04]"
+                    style={{
+                      borderBottom: "1px solid rgba(255,255,255,0.04)",
+                      cursor: isPairing ? "wait" : "pointer",
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Bluetooth size={12} style={{ color: "var(--color-text-secondary)" }} />
+                      <span className="text-xs font-medium" style={{ color: "var(--color-text)" }}>
+                        {dev.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>
+                        {dev.rssi} dBm
+                      </span>
+                      <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>
+                        {dev.address}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
 
         {/* ── ADR-02 footnote ── */}

@@ -195,7 +195,7 @@ interface SecurityTopBarProps {
   isDisconnected: boolean;
   deviceName: string | null;
   dominantColor: string | null;
-  requestPairing: () => Promise<void>;
+  requestPairing: (namePrefix?: string) => Promise<void>;
 }
 
 const SecurityTopBar = memo(function SecurityTopBar({
@@ -267,7 +267,7 @@ const SecurityTopBar = memo(function SecurityTopBar({
         )}
         {isDisconnected ? (
           <button
-            onClick={requestPairing}
+            onClick={() => requestPairing()}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer"
             style={{
               background: "rgba(239,68,68,0.12)",
@@ -562,7 +562,9 @@ function DashboardInner() {
   // Live sensor pipeline
   const {
     securityState, faceCount, dominantColor, isConnected,
-    isDisconnected, isSupported, deviceName, rssi, requestPairing,
+    isDisconnected, isSupported, deviceName, rssi, distance,
+    isGattOnly, isPairing, availableDevices,
+    scan, pair, unpair, requestPairing,
   } = useSecurityState();
 
   // Override wins when set by presenter keyboard shortcut; sensors resume on Ctrl+Shift+0
@@ -613,7 +615,14 @@ function DashboardInner() {
             <LockScreen
               deviceName={deviceName}
               rssi={rssi}
+              distance={distance}
               isSupported={isSupported}
+              isDisconnected={isDisconnected}
+              isGattOnly={isGattOnly}
+              isPairing={isPairing}
+              availableDevices={availableDevices}
+              scan={scan}
+              pair={pair}
               requestPairing={requestPairing}
             />
           )}

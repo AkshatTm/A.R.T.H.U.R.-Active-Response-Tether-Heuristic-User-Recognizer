@@ -25,6 +25,11 @@ interface RawSensorPayload {
   dominant_color: string;
   system_status: string;
   timestamp: number;
+  // BLE proximity tether fields (from backend BLE service)
+  ble_connected: boolean;
+  ble_rssi: number | null;
+  ble_distance_m: number | null;
+  ble_device_name: string | null;
 }
 
 /** Transformed payload exposed to React consumers (camelCase). */
@@ -37,6 +42,14 @@ export interface SensorPayload {
   systemStatus: string;
   /** Unix epoch seconds */
   timestamp: number;
+  /** True when paired BLE device is connected and within range. */
+  bleConnected: boolean;
+  /** Smoothed RSSI reading (dBm) from the paired BLE device, or null. */
+  bleRssi: number | null;
+  /** Estimated distance to the paired device in metres, or null. */
+  bleDistanceM: number | null;
+  /** Human-readable name of the paired BLE device, or null. */
+  bleDeviceName: string | null;
 }
 
 export type SocketStatus = "idle" | "connecting" | "open" | "closed" | "error";
@@ -79,7 +92,8 @@ function isRawSensorPayload(data: unknown): data is RawSensorPayload {
     typeof obj.face_count === "number" &&
     typeof obj.dominant_color === "string" &&
     typeof obj.system_status === "string" &&
-    typeof obj.timestamp === "number"
+    typeof obj.timestamp === "number" &&
+    typeof obj.ble_connected === "boolean"
   );
 }
 
@@ -90,6 +104,10 @@ function transformPayload(raw: RawSensorPayload): SensorPayload {
     dominantColor: raw.dominant_color,
     systemStatus: raw.system_status,
     timestamp: raw.timestamp,
+    bleConnected: raw.ble_connected,
+    bleRssi: raw.ble_rssi ?? null,
+    bleDistanceM: raw.ble_distance_m ?? null,
+    bleDeviceName: raw.ble_device_name ?? null,
   };
 }
 

@@ -4,20 +4,24 @@
  * This is the single source of truth for UI security state. It consolidates
  * both sensor hooks and applies the full Priority Matrix from DESIGN.md §5.
  *
- * Truth Table (in priority order):
- * ┌────────────────────────┬──────────────────────┬───────────────┐
- * │ BLE (isDisconnected)   │ Camera (faceCount)   │ UI State      │
- * ├────────────────────────┼──────────────────────┼───────────────┤
- * │ true  (Away/LOCKED)    │ ANY                  │ LOCKED        │
- * │ false (Present)        │ null / WS offline    │ BLURRED       │
- * │ false (Present)        │ -1  (Camera fault)   │ BLURRED       │
- * │ false (Present)        │ 0   (User away)      │ BLURRED       │
- * │ false (Present)        │ > 1 (Shoulder surf)  │ BLURRED       │
- * │ false (Present)        │ 1   (Secure)         │ SECURE        │
- * └────────────────────────┴──────────────────────┴───────────────┘
+ * BLE proximity tethering is now handled by the Python backend (Bleak library).
+ * The backend pushes `ble_connected`, `ble_rssi`, `ble_distance_m`, and
+ * `ble_device_name` through the WebSocket alongside camera data.
  *
- * ADR-02 Fail-Closed: isDisconnected defaults to true until a BLE device is
- * explicitly paired, so the initial state is always LOCKED (not BLURRED).
+ * Truth Table (in priority order):
+ * ┌──────────────────────────┬──────────────────────┬───────────────┐
+ * │ BLE (bleConnected)       │ Camera (faceCount)   │ UI State      │
+ * ├──────────────────────────┼──────────────────────┼───────────────┤
+ * │ false (Away/LOCKED)      │ ANY                  │ LOCKED        │
+ * │ true  (Present)          │ null / WS offline    │ BLURRED       │
+ * │ true  (Present)          │ -1  (Camera fault)   │ BLURRED       │
+ * │ true  (Present)          │ 0   (User away)      │ BLURRED       │
+ * │ true  (Present)          │ > 1 (Shoulder surf)  │ BLURRED       │
+ * │ true  (Present)          │ 1   (Secure)         │ SECURE        │
+ * └──────────────────────────┴──────────────────────┴───────────────┘
+ *
+ * ADR-02 Fail-Closed: bleConnected defaults to false until the backend
+ * reports the paired device is in range, so the initial state is LOCKED.
  */
 
 "use client";
@@ -47,23 +51,36 @@ export interface SecurityStateResult {
   /** True when the WebSocket handshake is complete and data is flowing. */
   isConnected: boolean;
 
-  // ── Bluetooth / Proximity data ─────────────────────────────────────────────
-  /** True = LOCKED (ADR-02 Fail-Closed — defaults true until paired). */
+  // ── Bluetooth / Proximity data (from backend via WebSocket) ────────────────
+  /** True = LOCKED (ADR-02 Fail-Closed — defaults true until backend confirms BLE). */
   isDisconnected: boolean;
-  /** False if navigator.bluetooth is unavailable in this browser. */
+  /** Always true — backend BLE doesn't depend on browser support. */
   isSupported: boolean;
   /** Human-readable BLE status for display in the UI. */
   statusMessage: string;
-  /** Paired BLE device name, or null if not paired. */
+  /** Paired BLE device name from backend, or null if not paired. */
   deviceName: string | null;
-  /** Last RSSI reading in dBm, or null. */
+  /** Last RSSI reading in dBm from backend, or null. */
   rssi: number | null;
+  /** Estimated distance to paired device in metres from backend, or null. */
+  distance: number | null;
+  /** Always false — backend handles full BLE, no GATT fallback. */
+  isGattOnly: boolean;
+  /** True while a scan/pair operation is in progress (frontend REST call). */
+  isPairing: boolean;
+  /** Devices found during the last scan. */
+  availableDevices: { name: string; address: string; rssi: number }[];
+  /** Trigger a BLE scan via the backend REST API. */
+  scan: () => Promise<void>;
+  /** Pair with a device by MAC address via the backend REST API. */
+  pair: (mac: string, name?: string, deviceType?: string) => Promise<void>;
+  /** Unpair the current device via the backend REST API. */
+  unpair: () => Promise<void>;
   /**
-   * Triggers navigator.bluetooth.requestDevice(). MUST be called from a
-   * user-gesture handler (e.g., onClick) — Web Bluetooth specification
-   * requirement; cannot be auto-invoked on mount.
+   * Legacy compatibility — triggers scan().
+   * Kept so LockScreen and SecurityTopBar don't need major rewrites.
    */
-  requestPairing: () => Promise<void>;
+  requestPairing: (namePrefix?: string) => Promise<void>;
 }
 
 // ── State Derivation Logic ──────────────────────────────────────────────────
@@ -71,6 +88,9 @@ export interface SecurityStateResult {
 /**
  * Derives the SecurityState from the current sensor readings.
  * Extracted as a pure function for easy unit testing.
+ *
+ * `bleConnected` comes from the WebSocket payload — the backend has already
+ * applied RSSI→distance conversion, hysteresis, and debouncing.
  */
 export function deriveSecurityState(
   isDisconnected: boolean,
@@ -83,7 +103,6 @@ export function deriveSecurityState(
   }
 
   // Priority 2a — WebSocket offline: no camera data to trust.
-  // Per DESIGN.md §7: "lose connection to Python backend → default to BLURRED."
   if (!isConnected || faceCount === null) {
     return "BLURRED";
   }
@@ -94,7 +113,6 @@ export function deriveSecurityState(
   }
 
   // Priority 3 — No face detected: user has stepped away.
-  // Bluetooth on desk ≠ user at desk. Blur is the conservative response.
   if (faceCount === 0) {
     return "BLURRED";
   }
@@ -111,24 +129,31 @@ export function deriveSecurityState(
 // ── Hook ────────────────────────────────────────────────────────────────────
 
 export function useSecurityState(): SecurityStateResult {
-  // Consume both sensor hooks. All complex lifecycle logic is encapsulated
-  // inside each hook — this layer only reads their outputs.
+  // Consume both sensor hooks.
   const { sensorData, isConnected, socketStatus } = useSecuritySocket();
   const {
-    isDisconnected,
-    isSupported,
-    deviceName,
-    rssi,
     statusMessage,
+    isGattOnly,
+    isPairing,
+    availableDevices,
+    scan,
+    pair,
+    unpair,
     requestPairing,
   } = useProximityTether();
 
-  // Derive faceCount and dominantColor from sensorData (null-safe).
+  // ── BLE state now comes from the WebSocket payload (backend-driven) ──
+  // sensorData.bleConnected = true means device is in range AND within unlock threshold
+  const bleConnected = sensorData?.bleConnected ?? false;
+  const isDisconnected = !bleConnected;
+  const deviceName = sensorData?.bleDeviceName ?? null;
+  const rssi = sensorData?.bleRssi ?? null;
+  const distance = sensorData?.bleDistanceM ?? null;
+
+  // Camera data (unchanged)
   const faceCount = sensorData?.faceCount ?? null;
   const dominantColor = sensorData?.dominantColor ?? null;
 
-  // useMemo ensures the state derivation only re-runs when the three inputs
-  // that feed the truth table actually change — not on every render tick.
   const securityState = useMemo<SecurityState>(
     () => deriveSecurityState(isDisconnected, faceCount, isConnected),
     [isDisconnected, faceCount, isConnected]
@@ -141,10 +166,17 @@ export function useSecurityState(): SecurityStateResult {
     socketStatus,
     isConnected,
     isDisconnected,
-    isSupported,
+    isSupported: true,
     statusMessage,
     deviceName,
     rssi,
+    distance,
+    isGattOnly,
+    isPairing,
+    availableDevices,
+    scan,
+    pair,
+    unpair,
     requestPairing,
   };
 }

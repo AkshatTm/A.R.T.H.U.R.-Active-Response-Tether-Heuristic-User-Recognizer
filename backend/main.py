@@ -50,10 +50,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import uvicorn
 
 from models import ThreadSafeState
 from vision_thread import VisionLoop
+from ble_tether import BLETetherService
 
 # ── Logging Configuration ───────────────────────────────────────────────────
 
@@ -69,6 +71,7 @@ logger = logging.getLogger("sentryos.main")
 
 shared_state = ThreadSafeState()
 vision_loop = VisionLoop(shared_state)
+ble_service = BLETetherService(state_updater=shared_state.update_ble)
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -106,6 +109,10 @@ async def lifespan(app: FastAPI):
     vision_loop.start()
     logger.info("Vision thread launched")
 
+    # Start BLE proximity tether (auto-connects if a device was previously paired)
+    await ble_service.auto_connect()
+    logger.info("BLE tether service initialised")
+
     # Register OS signal handlers for graceful shutdown on Ctrl+C.
     # uvicorn already handles SIGINT, but these ensure the vision
     # thread is stopped even if uvicorn's handler doesn't reach our
@@ -117,6 +124,10 @@ async def lifespan(app: FastAPI):
     # ── Shutdown ────────────────────────────────────────────────────
     logger.info("Shutdown signal received — tearing down …")
     vision_loop.stop(timeout=5.0)
+
+    # Gracefully shut down BLE tether
+    await ble_service.shutdown()
+    logger.info("BLE tether service stopped")
 
     # Close any lingering WebSocket connection.
     for client_id, ws in list(_active_ws.items()):
@@ -179,6 +190,81 @@ async def health_check():
         "vision_thread_alive": vision_loop.is_running,
         "uptime_seconds": round(time.time() - _start_time, 2),
     }
+
+
+# ── Bluetooth REST Endpoints ──────────────────────────────────────────────
+
+
+class PairRequest(BaseModel):
+    """Request body for POST /bluetooth/pair."""
+    mac: str
+    name: str | None = None
+    device_type: str = "classic"  # "classic" or "ble"
+
+
+@app.get("/bluetooth/scan")
+async def bluetooth_scan():
+    """Scan for nearby BLE devices and list OS-paired classic Bluetooth devices.
+
+    Returns a merged list of discovered devices sorted by signal strength.
+    Classic BT devices (earbuds/headphones) appear at the top.
+
+    Response Schema
+    ---------------
+    ```json
+    {
+        "devices": [
+            {"name": "Nirvana Crystl", "address": "90:A0:BE:8A:24:66", "rssi": 0, "type": "classic"},
+            {"name": "Pixel 7", "address": "AA:BB:CC:DD:EE:FF", "rssi": -45, "type": "ble"},
+            ...
+        ]
+    }
+    ```
+    """
+    devices = await ble_service.scan()
+    return {"devices": devices}
+
+
+@app.post("/bluetooth/pair")
+async def bluetooth_pair(req: PairRequest):
+    """Pair with a Bluetooth device by MAC address.
+
+    Saves the device config to disk and starts proximity monitoring.
+    On subsequent backend restarts, this device will auto-connect.
+
+    Use ``device_type: "classic"`` for earbuds/headphones (recommended),
+    or ``device_type: "ble"`` for BLE-only devices.
+
+    Request Body
+    ------------
+    ```json
+    {"mac": "90:A0:BE:8A:24:66", "name": "Nirvana Crystl", "device_type": "classic"}
+    ```
+    """
+    result = await ble_service.pair(
+        mac=req.mac, name=req.name, device_type=req.device_type,
+    )
+    return result
+
+
+@app.get("/bluetooth/status")
+async def bluetooth_status():
+    """Get current BLE tether status.
+
+    Response includes connection state, RSSI, estimated distance,
+    device name, and whether the monitor is running.
+    """
+    return ble_service.get_status()
+
+
+@app.post("/bluetooth/unpair")
+async def bluetooth_unpair():
+    """Unpair the current BLE device and delete saved config.
+
+    The session will immediately transition to LOCKED state.
+    """
+    result = await ble_service.unpair()
+    return result
 
 
 # ── WebSocket Endpoint ────────────────────────────────────────────────────
