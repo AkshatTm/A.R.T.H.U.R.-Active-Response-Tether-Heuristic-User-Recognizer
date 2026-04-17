@@ -1,6 +1,8 @@
 <div align="center">
 
-# SentryOS
+# A.R.T.H.U.R.
+
+### Active Response Tether & Heuristic User Recognizer
 
 ### AI-Powered Zero-Trust Physical Endpoint Security
 
@@ -10,7 +12,7 @@
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Face%20Detection-4285F4?logo=google)](https://mediapipe.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**SentryOS** is a proactive, edge-compute endpoint security system that continuously verifies the physical security of a workspace using computer vision, Bluetooth proximity tethering, and adaptive UI obfuscation — all processed locally with zero cloud dependency.
+**A.R.T.H.U.R.** is a proactive, edge-compute endpoint security system that continuously verifies the physical security of a workspace using computer vision, Bluetooth proximity tethering, and adaptive UI obfuscation — all processed locally with zero cloud dependency.
 
 [Quick Start](#quick-start) · [Architecture](#architecture) · [Features](#features) · [Documentation](#documentation) · [Demo](#demo-mode)
 
@@ -20,7 +22,7 @@
 
 ## Overview
 
-Traditional endpoint security relies on software perimeters — VPNs, firewalls, and session timeouts. SentryOS addresses the **physical zero-trust gap**: shoulder surfing, device abandonment, and unauthorized screen viewing.
+Traditional endpoint security relies on software perimeters — VPNs, firewalls, and session timeouts. A.R.T.H.U.R. addresses the **physical zero-trust gap**: shoulder surfing, device abandonment, and unauthorized screen viewing.
 
 The system fuses three independent security signals into a deterministic state machine:
 
@@ -198,7 +200,7 @@ SentryOS_Project/
 
 ## Security Model
 
-SentryOS follows a **fail-closed** security posture:
+A.R.T.H.U.R. follows a **fail-closed** security posture:
 
 - **No Bluetooth device** → LOCKED (not BLURRED)
 - **Camera failure** → BLURRED (not SECURE)

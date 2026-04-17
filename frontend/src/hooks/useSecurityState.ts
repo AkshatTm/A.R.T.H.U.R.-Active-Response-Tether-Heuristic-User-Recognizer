@@ -1,5 +1,5 @@
 /**
- * useSecurityState — SentryOS Security State Machine
+ * useSecurityState — A.R.T.H.U.R. Security State Machine
  *
  * This is the single source of truth for UI security state. It consolidates
  * both sensor hooks and applies the full Priority Matrix from DESIGN.md §5.

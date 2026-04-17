@@ -1,8 +1,8 @@
 """
-SentryOS Backend — FastAPI Application & WebSocket Broadcaster
+A.R.T.H.U.R. Backend — FastAPI Application & WebSocket Broadcaster
 ===============================================================
 
-This is the entry point for the SentryOS AI Sensory Engine.  It
+This is the entry point for the A.R.T.H.U.R. AI Sensory Engine.  It
 orchestrates three responsibilities:
 
 1. **Lifecycle management** — starts the Vision Thread on application
@@ -43,10 +43,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import signal
+import os
 import sys
 import time
 from contextlib import asynccontextmanager
+
+# Suppress TFLite / glog noise before any MediaPipe / TensorFlow import.
+# W0000 inference_feedback_manager.cc:121 is a known benign BlazeFace
+# limitation — it does not affect detection accuracy.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("GLOG_minloglevel", "3")
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -65,7 +71,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     stream=sys.stdout,
 )
-logger = logging.getLogger("sentryos.main")
+logger = logging.getLogger("arthur.main")
 
 # ── Shared Infrastructure ──────────────────────────────────────────────────
 
@@ -103,7 +109,7 @@ async def lifespan(app: FastAPI):
     """
     # ── Startup ─────────────────────────────────────────────────────
     logger.info("=" * 60)
-    logger.info("  SentryOS AI Sensory Engine — Starting Up")
+    logger.info("  A.R.T.H.U.R. AI Sensory Engine — Starting Up")
     logger.info("=" * 60)
 
     vision_loop.start()
@@ -113,11 +119,11 @@ async def lifespan(app: FastAPI):
     await ble_service.auto_connect()
     logger.info("BLE tether service initialised")
 
-    # Register OS signal handlers for graceful shutdown on Ctrl+C.
-    # uvicorn already handles SIGINT, but these ensure the vision
-    # thread is stopped even if uvicorn's handler doesn't reach our
-    # shutdown code.
-    _register_signal_handlers()
+    # NOTE: We intentionally do NOT override the OS signal handlers here.
+    # uvicorn installs its own SIGINT / SIGTERM handlers that trigger the
+    # lifespan shutdown (the code below the yield).  Overriding them with
+    # a synchronous stop() call would block the event loop and prevent
+    # WebSocket connections from being closed gracefully.
 
     yield  # ← application runs here
 
@@ -137,15 +143,15 @@ async def lifespan(app: FastAPI):
             pass
     _active_ws.clear()
 
-    logger.info("SentryOS AI Sensory Engine — Shutdown complete")
+    logger.info("A.R.T.H.U.R. AI Sensory Engine — Shutdown complete")
 
 
 # ── FastAPI Application ────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="SentryOS API",
+    title="A.R.T.H.U.R. API",
     description=(
-        "Backend for the SentryOS Zero-Trust Remote Workspace. "
+        "Backend for the A.R.T.H.U.R. Zero-Trust Remote Workspace. "
         "Streams real-time face-count and dominant-colour data over WebSocket."
     ),
     version="1.0.0",
@@ -164,6 +170,13 @@ app.add_middleware(
 
 # ── REST Endpoints ─────────────────────────────────────────────────────────
 
+@app.get("/", include_in_schema=False)
+async def root_redirect():
+    """Redirect browser / curl hits on / to the interactive API docs."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/docs")
+
+
 @app.get("/health")
 async def health_check():
     """Liveness + readiness probe.
@@ -176,7 +189,7 @@ async def health_check():
     ```json
     {
         "status": "ok",
-        "service": "SentryOS",
+        "service": "A.R.T.H.U.R.",
         "engine": { ... current ThreadSafeState snapshot ... },
         "vision_thread_alive": true,
         "uptime_seconds": 123.45
@@ -185,7 +198,7 @@ async def health_check():
     """
     return {
         "status": "ok",
-        "service": "SentryOS",
+        "service": "A.R.T.H.U.R.",
         "engine": shared_state.get_snapshot(),
         "vision_thread_alive": vision_loop.is_running,
         "uptime_seconds": round(time.time() - _start_time, 2),
@@ -320,7 +333,7 @@ async def websocket_endpoint(websocket: WebSocket):
     # protocol compatibility.
     await websocket.send_json({
         "event": "connected",
-        "message": "SentryOS WebSocket ready",
+        "message": "A.R.T.H.U.R. WebSocket ready",
         "version": "1.0.0",
     })
 
@@ -365,22 +378,6 @@ async def _drain_client_messages(websocket: WebSocket) -> None:
         pass  # Connection closed — nothing to drain.
 
 
-def _register_signal_handlers() -> None:
-    """Register OS signal handlers for graceful shutdown.
-
-    On Windows, ``SIGTERM`` is not reliably delivered, so we also
-    register ``SIGINT`` (Ctrl+C) and ``SIGBREAK`` (Ctrl+Break).
-    """
-    def _handle_signal(sig, frame):
-        logger.info("Received signal %s — requesting shutdown …", sig)
-        vision_loop.stop(timeout=3.0)
-
-    signal.signal(signal.SIGINT, _handle_signal)
-    if hasattr(signal, "SIGBREAK"):
-        # Windows-specific: Ctrl+Break
-        signal.signal(signal.SIGBREAK, _handle_signal)
-
-
 # ── Module-level timestamp for uptime calculation ──────────────────────────
 
 _start_time: float = time.time()
@@ -389,8 +386,12 @@ _start_time: float = time.time()
 # ── Dev Entry Point ────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # Pass the app *object* (not the "main:app" string) so that uvicorn
+    # does NOT re-import this module.  Using the string form causes the
+    # module-level code to execute twice, creating orphaned VisionLoop
+    # and BLETetherService instances.
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
         port=8000,
         reload=False,       # Reload is unsafe with background threads

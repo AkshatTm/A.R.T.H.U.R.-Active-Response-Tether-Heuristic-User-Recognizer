@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | SentryOS |
+| **Product** | A.R.T.H.U.R. |
 | **Last Updated** | 2026-03-02 |
 
 ---

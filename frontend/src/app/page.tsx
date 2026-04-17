@@ -1,95 +1,77 @@
 /**
- * Login Page — SentryOS
+ * Login Page — A.R.T.H.U.R.
  *
- * The entry point for the demo. Presents a premium enterprise authentication
- * screen with a glassmorphism card, pre-filled identity, and a smooth auth
- * animation before redirecting to /dashboard.
- *
- * Auth flow:
- *   1. User enters passphrase (email is pre-filled).
- *   2. 800ms "Authenticating…" animation (simulates network round-trip).
- *   3. sessionStorage.setItem('sentry_auth', '1').
- *   4. router.push('/dashboard') — ChameleonWrapper stays live through transition.
- *
- * sessionStorage is intentionally used so the session clears automatically
- * when the presenter closes the tab between demo runs.
+ * Redesigned per UI Enhancement Master Plan §6.1:
+ * - GradientMesh background (replaces dot grid)
+ * - No scan-line animation, no HUD corners
+ * - Single top-edge accent gradient line on card
+ * - Satoshi Bold title, Space Grotesk subtitle (normal case)
+ * - IBM Plex Mono input values, Space Grotesk labels
+ * - Sentence-case button: "Authenticate →"
+ * - Floating shield icon (no box), breathing scale
+ * - System status strip removed
+ * - Keyboard shortcut hint added
+ * - Magnetic button effect on CTA
  */
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useSpring } from "framer-motion";
 import { ShieldCheck, Eye, EyeOff, AlertCircle } from "lucide-react";
 import { ChameleonWrapper } from "@/components/ChameleonWrapper";
+import { GradientMesh } from "@/components/GradientMesh";
 import { AUTH_SESSION_KEY } from "@/hooks/useAuthGuard";
 
-// ─── Animated background ──────────────────────────────────────────────────────
+// ─── Magnetic Button Wrapper ──────────────────────────────────────────────────
+// Lerps toward the cursor when it enters a 60px radius
 
-function GridBackground() {
-  return (
-    <div
-      aria-hidden
-      style={{
-        position: "absolute",
-        inset: 0,
-        overflow: "hidden",
-        pointerEvents: "none",
-      }}
-    >
-      {/* Chameleon radial glow */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          background:
-            "radial-gradient(ellipse 65% 55% at 50% 38%, var(--theme-glow) 0%, transparent 72%)",
-          opacity: 0.45,
-          transition: "opacity 0.6s",
-        }}
-      />
-      {/* Dot grid */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          backgroundImage:
-            "radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)",
-          backgroundSize: "32px 32px",
-        }}
-      />
-    </div>
+function MagneticButton({
+  children,
+  className,
+  style,
+  disabled,
+  type,
+  onClick,
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const x = useSpring(0, { stiffness: 200, damping: 20 });
+  const y = useSpring(0, { stiffness: 200, damping: 20 });
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLButtonElement>) => {
+      if (!ref.current || disabled) return;
+      const rect = ref.current.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const dx = e.clientX - cx;
+      const dy = e.clientY - cy;
+      x.set(dx * 0.18);
+      y.set(dy * 0.18);
+    },
+    [disabled, x, y]
   );
-}
 
-// ─── System status strip ──────────────────────────────────────────────────────
-
-function SystemStatus() {
-  const items = [
-    { label: "NODE", value: "SGX-PROD-07" },
-    { label: "REGION", value: "IN-MUM-1" },
-    { label: "TLS", value: "1.3 / ECDSA" },
-    { label: "BUILD", value: "v4.0.0" },
-  ];
+  const handleMouseLeave = useCallback(() => {
+    x.set(0);
+    y.set(0);
+  }, [x, y]);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: "1.5rem",
-        flexWrap: "wrap",
-        justifyContent: "center",
-        fontSize: "0.625rem",
-        fontFamily: "'JetBrains Mono', monospace",
-        letterSpacing: "0.08em",
-      }}
+    <motion.button
+      ref={ref}
+      type={type}
+      className={className}
+      style={{ ...style, x, y }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+      onClick={onClick}
+      disabled={disabled}
+      whileTap={!disabled ? { scale: 0.97 } : {}}
+      transition={{ type: "spring", stiffness: 300, damping: 18 }}
     >
-      {items.map(({ label, value }) => (
-        <span key={label}>
-          <span style={{ color: "var(--color-muted)" }}>{label}: </span>
-          <span style={{ color: "var(--theme-primary)" }}>{value}</span>
-        </span>
-      ))}
-    </div>
+      {children}
+    </motion.button>
   );
 }
 
@@ -105,6 +87,7 @@ interface FieldProps {
   placeholder?: string;
   autoComplete?: string;
   hasError?: boolean;
+  autoFocus?: boolean;
   suffix?: React.ReactNode;
   inputRef?: React.RefObject<HTMLInputElement>;
 }
@@ -119,15 +102,16 @@ function Field({
   placeholder,
   autoComplete,
   hasError,
+  autoFocus,
   suffix,
   inputRef,
 }: FieldProps) {
   const [focused, setFocused] = useState(false);
   const borderColor = hasError
-    ? "#ef4444"
+    ? "var(--color-danger)"
     : focused
     ? "var(--theme-primary)"
-    : "rgba(255,255,255,0.1)";
+    : "var(--color-border)";
 
   return (
     <div>
@@ -135,12 +119,13 @@ function Field({
         htmlFor={id}
         style={{
           display: "block",
-          fontSize: "0.625rem",
-          fontFamily: "'JetBrains Mono', monospace",
-          color: "var(--color-muted)",
-          letterSpacing: "0.12em",
-          marginBottom: "0.375rem",
-          textTransform: "uppercase",
+          fontSize: "var(--fs-xs)",
+          fontFamily: "var(--font-body)",
+          color: focused ? "var(--color-text-secondary)" : "var(--color-muted)",
+          letterSpacing: "0.02em",
+          marginBottom: "0.5rem",
+          transition: "color 0.2s",
+          fontWeight: 500,
         }}
       >
         {label}
@@ -155,26 +140,27 @@ function Field({
           disabled={disabled}
           placeholder={placeholder}
           autoComplete={autoComplete}
+          autoFocus={autoFocus}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           style={{
             width: "100%",
             background: "rgba(255,255,255,0.04)",
             border: `1px solid ${borderColor}`,
-            borderRadius: "8px",
+            borderRadius: "10px",
             padding: suffix
-              ? "0.625rem 2.75rem 0.625rem 0.875rem"
-              : "0.625rem 0.875rem",
-            fontSize: "0.875rem",
+              ? "0.75rem 2.75rem 0.75rem 0.875rem"
+              : "0.75rem 0.875rem",
+            minHeight: "44px",
+            fontSize: "var(--fs-sm)",
             color: "var(--color-text)",
-            fontFamily:
-              type === "password"
-                ? "monospace"
-                : "'JetBrains Mono', monospace",
+            // Mono only for actual data input values
+            fontFamily: "var(--font-mono, 'IBM Plex Mono', monospace)",
             outline: "none",
-            transition: "border-color 0.2s, background 0.2s",
+            transition: "border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease",
             boxSizing: "border-box",
-            opacity: disabled ? 0.55 : 1,
+            opacity: disabled ? 0.5 : 1,
+            boxShadow: focused ? `0 0 0 3px color-mix(in srgb, var(--theme-primary) 10%, transparent)` : "none",
           }}
         />
         {suffix && (
@@ -204,7 +190,7 @@ type AuthPhase = "idle" | "authenticating" | "success" | "error";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState("akshat.tomar@sentryos.corp");
+  const [email, setEmail] = useState("akshat.tomar@arthur.corp");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [phase, setPhase] = useState<AuthPhase>("idle");
@@ -232,14 +218,9 @@ export default function LoginPage() {
     }
 
     setPhase("authenticating");
-
-    // Simulated auth round-trip — 800ms to sell the narrative
     await new Promise<void>((r) => setTimeout(r, 800));
-
     sessionStorage.setItem(AUTH_SESSION_KEY, "1");
     setPhase("success");
-
-    // Brief success flash, then navigate
     await new Promise<void>((r) => setTimeout(r, 380));
     router.push("/setup");
   };
@@ -258,7 +239,8 @@ export default function LoginPage() {
           position: "relative",
         }}
       >
-        <GridBackground />
+        {/* Animated gradient mesh background — replaces dot grid */}
+        <GradientMesh />
 
         {/* ── Auth Card ─────────────────────────────────────────────── */}
         <motion.div
@@ -266,28 +248,36 @@ export default function LoginPage() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{
             duration: 0.55,
-            ease: [0.25, 0.46, 0.45, 0.94] as [
-              number,
-              number,
-              number,
-              number
-            ],
+            ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
           }}
           style={{
             position: "relative",
             zIndex: 1,
             width: "100%",
             maxWidth: "400px",
-            background: "rgba(255, 255, 255, 0.035)",
-            border: "1px solid var(--theme-border)",
+            background: "rgba(19, 19, 26, 0.75)",
+            border: "1px solid var(--color-border)",
             borderRadius: "16px",
             padding: "2.5rem",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
-            boxShadow:
-              "0 0 64px var(--theme-glow), 0 32px 64px rgba(0,0,0,0.45)",
+            boxShadow: "0 32px 64px rgba(0,0,0,0.5)",
+            overflow: "hidden",
           }}
         >
+          {/* Top-edge accent gradient line — single, restrained focal point */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: "10%",
+              right: "10%",
+              height: "1px",
+              background: "linear-gradient(90deg, transparent, var(--theme-primary), transparent)",
+              opacity: 0.7,
+            }}
+          />
+
           {/* ── Wordmark ─────────────────────────────────────────────── */}
           <div
             style={{
@@ -295,60 +285,50 @@ export default function LoginPage() {
               flexDirection: "column",
               alignItems: "center",
               marginBottom: "2.25rem",
-              gap: "0.75rem",
+              gap: "1rem",
             }}
           >
+            {/* Floating shield icon — no box, breathing scale */}
             <motion.div
-              animate={{
-                boxShadow: [
-                  "0 0 0px var(--theme-glow)",
-                  "0 0 24px var(--theme-glow)",
-                  "0 0 0px var(--theme-glow)",
-                ],
-              }}
-              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              animate={{ scale: [1, 1.04, 1] }}
+              transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
               style={{
                 display: "inline-flex",
                 alignItems: "center",
                 justifyContent: "center",
-                width: "52px",
-                height: "52px",
-                borderRadius: "14px",
-                background: "var(--theme-glow)",
-                border: "1.5px solid var(--theme-border)",
+                color: "var(--theme-primary)",
+                filter: "drop-shadow(0 0 12px var(--theme-primary))",
               }}
             >
-              <ShieldCheck
-                size={26}
-                color="var(--theme-primary)"
-                strokeWidth={1.75}
-              />
+              <ShieldCheck size={40} strokeWidth={1.5} />
             </motion.div>
 
             <div style={{ textAlign: "center" }}>
               <h1
                 style={{
-                  fontSize: "1.375rem",
+                  fontSize: "2rem",
                   fontWeight: 700,
+                  fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
                   color: "var(--color-text)",
-                  letterSpacing: "-0.02em",
+                  letterSpacing: "-0.03em",
                   margin: 0,
-                  lineHeight: 1.2,
+                  lineHeight: 1.15,
                 }}
               >
-                SentryOS
+                A.R.T.H.U.R.
               </h1>
+              {/* Normal case, quieter subtitle — Space Grotesk, not mono */}
               <p
                 style={{
-                  fontSize: "0.625rem",
+                  fontSize: "var(--fs-sm)",
                   color: "var(--color-muted)",
-                  letterSpacing: "0.16em",
-                  fontFamily: "'JetBrains Mono', monospace",
-                  margin: "0.3rem 0 0",
-                  textTransform: "uppercase",
+                  fontFamily: "var(--font-body)",
+                  margin: "0.4rem 0 0",
+                  fontWeight: 400,
+                  opacity: 0.7,
                 }}
               >
-                Zero-Trust Workspace Terminal
+                Zero-trust workspace terminal
               </p>
             </div>
           </div>
@@ -356,11 +336,7 @@ export default function LoginPage() {
           {/* ── Form ─────────────────────────────────────────────────── */}
           <form
             onSubmit={handleSubmit}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "1rem",
-            }}
+            style={{ display: "flex", flexDirection: "column", gap: "1.125rem" }}
           >
             <Field
               id="email"
@@ -404,7 +380,6 @@ export default function LoginPage() {
                     borderRadius: "4px",
                     outline: "none",
                   }}
-                  className="focus-visible:ring-1 focus-visible:ring-[var(--theme-primary)]"
                 >
                   {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
@@ -423,8 +398,9 @@ export default function LoginPage() {
                     display: "flex",
                     alignItems: "center",
                     gap: "0.3rem",
-                    fontSize: "0.75rem",
-                    color: "#ef4444",
+                    fontSize: "var(--fs-sm)",
+                    color: "var(--color-danger)",
+                    fontFamily: "var(--font-body)",
                   }}
                 >
                   <AlertCircle size={12} />
@@ -433,36 +409,32 @@ export default function LoginPage() {
               )}
             </AnimatePresence>
 
-            {/* Submit button */}
-            <motion.button
+            {/* Submit button — sentence case, gradient background, magnetic */}
+            <MagneticButton
               type="submit"
               disabled={isLoading}
-              whileHover={!isLoading ? { scale: 1.012 } : {}}
-              whileTap={!isLoading ? { scale: 0.988 } : {}}
               style={{
                 marginTop: "0.25rem",
                 width: "100%",
-                padding: "0.75rem",
-                borderRadius: "8px",
+                padding: "0.8rem",
+                borderRadius: "10px",
                 background:
                   phase === "success"
-                    ? "rgba(34,197,94,0.12)"
-                    : "var(--theme-glow)",
-                border: `1.5px solid ${
-                  phase === "success" ? "#22c55e" : "var(--theme-border)"
-                }`,
-                color:
-                  phase === "success" ? "#22c55e" : "var(--theme-primary)",
-                fontSize: "0.75rem",
+                    ? "rgba(45,212,168,0.12)"
+                    : "linear-gradient(135deg, var(--theme-glow), color-mix(in srgb, var(--theme-primary) 15%, transparent))",
+                border: `1.5px solid ${phase === "success" ? "var(--color-success)" : "var(--theme-border)"}`,
+                color: phase === "success" ? "var(--color-success)" : "var(--theme-primary)",
+                fontSize: "var(--fs-sm)",
                 fontWeight: 600,
-                fontFamily: "'JetBrains Mono', monospace",
-                letterSpacing: "0.12em",
+                fontFamily: "var(--font-body)",
+                letterSpacing: "0.01em",
                 cursor: isLoading ? "not-allowed" : "pointer",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 gap: "0.5rem",
                 transition: "border-color 0.25s, background 0.25s, color 0.25s",
+                position: "relative",
               }}
             >
               <AnimatePresence mode="wait">
@@ -474,7 +446,7 @@ export default function LoginPage() {
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.12 }}
                   >
-                    AUTHENTICATE →
+                    Authenticate →
                   </motion.span>
                 ) : phase === "authenticating" ? (
                   <motion.span
@@ -483,23 +455,15 @@ export default function LoginPage() {
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.12 }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.5rem",
-                    }}
+                    style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}
                   >
                     <motion.span
                       animate={{ opacity: [1, 0.25, 1] }}
-                      transition={{
-                        duration: 0.9,
-                        repeat: Infinity,
-                        ease: "easeInOut",
-                      }}
+                      transition={{ duration: 0.9, repeat: Infinity }}
                     >
                       ◈
                     </motion.span>
-                    AUTHENTICATING…
+                    Authenticating…
                   </motion.span>
                 ) : (
                   <motion.span
@@ -508,11 +472,26 @@ export default function LoginPage() {
                     animate={{ opacity: 1, scale: 1 }}
                     transition={{ type: "spring", stiffness: 320, damping: 22 }}
                   >
-                    ✓ ACCESS GRANTED
+                    ✓ Access granted
                   </motion.span>
                 )}
               </AnimatePresence>
-            </motion.button>
+            </MagneticButton>
+
+            {/* Keyboard shortcut hint */}
+            <p
+              style={{
+                textAlign: "center",
+                fontSize: "var(--fs-xs)",
+                color: "var(--color-muted)",
+                fontFamily: "var(--font-body)",
+                opacity: 0.55,
+                marginTop: "-0.25rem",
+                letterSpacing: "0.01em",
+              }}
+            >
+              Press Enter to authenticate
+            </p>
           </form>
 
           {/* ── Footer note ──────────────────────────────────────────── */}
@@ -520,29 +499,32 @@ export default function LoginPage() {
             style={{
               marginTop: "1.75rem",
               paddingTop: "1.25rem",
-              borderTop: "1px solid rgba(255,255,255,0.06)",
-              fontSize: "0.625rem",
+              borderTop: "1px solid var(--color-border-subtle)",
+              fontSize: "var(--fs-xs)",
               color: "var(--color-muted)",
-              fontFamily: "'JetBrains Mono', monospace",
-              letterSpacing: "0.04em",
-              lineHeight: 1.7,
+              fontFamily: "var(--font-body)",
+              letterSpacing: "0.01em",
+              lineHeight: 1.6,
               textAlign: "center",
+              opacity: 0.6,
             }}
           >
-            Protected by real-time BLE proximity tether
-            <br />
-            and multi-face AI detection. Sessions expire on tab close.
+            Protected by real-time BLE proximity tether and multi-face AI detection.
           </p>
-        </motion.div>
 
-        {/* ── System status ─────────────────────────────────────────── */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.65, duration: 0.5 }}
-          style={{ position: "relative", zIndex: 1, marginTop: "2rem" }}
-        >
-          <SystemStatus />
+          {/* Version footnote */}
+          <p
+            style={{
+              textAlign: "center",
+              fontSize: "var(--fs-xs)",
+              color: "var(--color-muted)",
+              fontFamily: "var(--font-mono)",
+              opacity: 0.3,
+              marginTop: "0.5rem",
+            }}
+          >
+            v4.0.0
+          </p>
         </motion.div>
       </div>
     </ChameleonWrapper>

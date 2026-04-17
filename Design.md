@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | SentryOS |
+| **Product** | A.R.T.H.U.R. |
 | **Version** | 2.0.0 |
 | **Pattern** | Decoupled Modular Monolith / Edge-Compute AI |
 | **Last Updated** | 2026-03-02 |
@@ -11,11 +11,11 @@
 
 ## 1. Architectural Overview
 
-SentryOS uses a **Decoupled Modular Monolith** architecture. Two independent runtime environments coexist in a single repository, communicating exclusively through a local WebSocket channel:
+A.R.T.H.U.R. uses a **Decoupled Modular Monolith** architecture. Two independent runtime environments coexist in a single repository, communicating exclusively through a local WebSocket channel:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              SentryOS System                                │
+│                              A.R.T.H.U.R. System                                │
 │                                                                             │
 │  ┌──────────────────────────┐            ┌──────────────────────────────┐   │
 │  │   Edge AI Engine         │  WS 10 Hz  │   Zero-Trust Terminal        │   │
@@ -183,7 +183,7 @@ Runtime → frame = camera.read()
 - **Rate:** 10 Hz (100ms intervals via `asyncio.sleep(0.1)`)
 - **Direction:** Unidirectional server → client push
 - **Client limit:** Single client enforced (ADR-03). Second connections receive close code `4001`.
-- **Handshake:** On connect, server sends `{"event": "connected", "message": "SentryOS WebSocket ready", "version": "1.0.0"}`
+- **Handshake:** On connect, server sends `{"event": "connected", "message": "A.R.T.H.U.R. WebSocket ready", "version": "1.0.0"}`
 - **Drain:** Background task consumes any client-sent messages to prevent buffer overflow
 
 ---

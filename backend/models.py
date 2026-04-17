@@ -1,10 +1,10 @@
 """
-SentryOS — Canonical Data Models & Thread-Safe State Container
+A.R.T.H.U.R. — Canonical Data Models & Thread-Safe State Container
 ==============================================================
 
 This module defines the **single source of truth** for all data flowing
 between the Vision Thread (producer) and the WebSocket broadcaster
-(consumer) inside the SentryOS backend.
+(consumer) inside the A.R.T.H.U.R. backend.
 
 Architecture Role
 -----------------

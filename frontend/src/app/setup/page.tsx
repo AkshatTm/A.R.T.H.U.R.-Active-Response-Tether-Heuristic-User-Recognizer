@@ -1,15 +1,19 @@
 /**
- * BLE Setup Page — SentryOS
+ * BLE Setup Page — A.R.T.H.U.R.
  *
- * Sits between login (/  ) and the dashboard. Every session the user must
- * confirm (or establish) a BLE tether before accessing the dashboard.
+ * Redesigned per UI Enhancement Master Plan §6.2:
+ * - GradientMesh background (consistent with login)
+ * - No HUD corners, no scan-line
+ * - Segmented progress bar (2 steps, step 2 filled)
+ * - Device list items with left color accent bar
+ * - Space Grotesk labels, IBM Plex Mono data values
+ * - Footer: single line, Space Grotesk, quieter
  *
  * Flow:
  *   1. useSetupGuard() ensures the user is logged in; redirects to / if not.
  *   2. On mount, fetch GET /bluetooth/status to check backend auto-connect.
  *   3a. If already connected → show "Continue to Dashboard →" (quick path).
  *   3b. If not connected → show scan / device-list UI.
- *   4. On pair success or continue → set BLE_SESSION_KEY → router.push("/dashboard").
  */
 
 "use client";
@@ -28,6 +32,7 @@ import {
   Zap,
 } from "lucide-react";
 import { ChameleonWrapper } from "@/components/ChameleonWrapper";
+import { GradientMesh } from "@/components/GradientMesh";
 import { useSetupGuard, BLE_SESSION_KEY } from "@/hooks/useAuthGuard";
 import { useProximityTether } from "@/hooks/useProximityTether";
 
@@ -76,21 +81,64 @@ function SignalBars({ rssi }: { rssi: number | null }) {
   );
 }
 
-// ── Grid background (same as login) ───────────────────────────────────────
+// ── Segmented Progress Indicator ──────────────────────────────────────────
 
-function GridBackground() {
+function StepIndicator({ current, total }: { current: number; total: number }) {
   return (
-    <div aria-hidden style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
-      <div style={{
-        position: "absolute", inset: 0,
-        background: "radial-gradient(ellipse 65% 55% at 50% 38%, var(--theme-glow) 0%, transparent 72%)",
-        opacity: 0.35, transition: "opacity 0.6s",
-      }} />
-      <div style={{
-        position: "absolute", inset: 0,
-        backgroundImage: "radial-gradient(circle, rgba(255,255,255,0.07) 1px, transparent 1px)",
-        backgroundSize: "32px 32px",
-      }} />
+    <div className="flex items-center gap-2" style={{ marginBottom: "1.5rem" }}>
+      {Array.from({ length: total }).map((_, i) => {
+        const isCompleted = i + 1 < current;
+        const isActive = i + 1 === current;
+        return (
+          <div key={i} className="flex items-center gap-2">
+            <div
+              style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: "var(--fs-xs)",
+                fontFamily: "var(--font-body)",
+                fontWeight: 600,
+                transition: "all 0.3s ease",
+                background: isActive
+                  ? "var(--theme-primary)"
+                  : isCompleted
+                  ? "var(--color-success)"
+                  : "var(--color-border)",
+                color: isActive || isCompleted ? "var(--color-bg)" : "var(--color-muted)",
+                boxShadow: isActive ? `0 0 12px var(--theme-glow)` : "none",
+              }}
+            >
+              {isCompleted ? "✓" : i + 1}
+            </div>
+            {i < total - 1 && (
+              <div
+                style={{
+                  width: "48px",
+                  height: "1px",
+                  background: isCompleted
+                    ? "var(--color-success)"
+                    : "var(--color-border)",
+                  transition: "background 0.4s ease",
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+      <span
+        style={{
+          fontSize: "var(--fs-xs)",
+          color: "var(--color-muted)",
+          fontFamily: "var(--font-body)",
+          marginLeft: "0.5rem",
+        }}
+      >
+        Device pairing
+      </span>
     </div>
   );
 }
@@ -116,32 +164,32 @@ function ConnectedCard({
       {/* Status badge */}
       <div className="flex items-center justify-center gap-2">
         <span
-          className="w-2 h-2 rounded-full animate-pulse"
+          className="w-2 h-2 rounded-full"
           style={{ background: "var(--color-success)", boxShadow: "0 0 8px var(--color-success)" }}
         />
         <span
-          className="text-xs font-semibold tracking-widest uppercase"
-          style={{ color: "var(--color-success)", fontFamily: "monospace" }}
+          style={{ color: "var(--color-success)", fontFamily: "var(--font-body)", fontSize: "var(--fs-xs)", fontWeight: 600, letterSpacing: "0.06em" }}
         >
-          Device Connected
+          Device connected
         </span>
       </div>
 
-      {/* Device info strip */}
+      {/* Device info strip — left green accent bar */}
       <div
-        className="flex items-center justify-between rounded-xl px-4 py-3"
+        className="flex items-center justify-between px-4 py-3 rounded-xl"
         style={{
-          background: "rgba(34,197,94,0.06)",
-          border: "1px solid rgba(34,197,94,0.25)",
+          background: "rgba(45,212,168,0.06)",
+          border: "1px solid rgba(45,212,168,0.2)",
+          borderLeft: "3px solid var(--color-success)",
         }}
       >
         <div className="flex items-center gap-3">
           <Bluetooth size={16} style={{ color: "var(--color-success)" }} />
           <div>
-            <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+            <p style={{ fontSize: "var(--fs-sm)", fontWeight: 600, fontFamily: "var(--font-body)", color: "var(--color-text)" }}>
               {status.device_name ?? "Unknown Device"}
             </p>
-            <p className="text-[10px] font-mono mt-0.5" style={{ color: "var(--color-muted)" }}>
+            <p style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-mono)", color: "var(--color-muted)", marginTop: "0.15rem" }}>
               {status.paired_mac ?? "—"}
             </p>
           </div>
@@ -149,10 +197,10 @@ function ConnectedCard({
         <div className="flex items-center gap-3">
           <SignalBars rssi={status.rssi} />
           <div className="text-right">
-            <p className="text-xs font-mono" style={{ color: "var(--color-text-secondary)" }}>
+            <p style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
               {status.rssi !== null ? `${status.rssi} dBm` : "—"}
             </p>
-            <p className="text-[10px]" style={{ color: "var(--color-muted)" }}>
+            <p style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-body)", color: "var(--color-muted)" }}>
               {rssiLabel(status.rssi, status.distance_m)}
             </p>
           </div>
@@ -164,25 +212,34 @@ function ConnectedCard({
         onClick={onContinue}
         whileHover={{ scale: 1.012 }}
         whileTap={{ scale: 0.988 }}
-        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold tracking-widest uppercase"
+        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl"
         style={{
-          background: "var(--theme-glow)",
+          background: "linear-gradient(135deg, var(--theme-glow), color-mix(in srgb, var(--theme-primary) 15%, transparent))",
           border: "1.5px solid var(--theme-border)",
           color: "var(--theme-primary)",
-          fontFamily: "monospace",
+          fontFamily: "var(--font-body)",
+          fontWeight: 600,
+          fontSize: "var(--fs-sm)",
           cursor: "pointer",
         }}
       >
         <ShieldCheck size={15} />
-        Continue to Dashboard
+        Continue to dashboard
         <ChevronRight size={15} />
       </motion.button>
 
       {/* Use a different device */}
       <button
         onClick={onUseDifferent}
-        className="text-xs text-center transition-colors"
-        style={{ color: "var(--color-muted)", background: "none", border: "none", cursor: "pointer", fontFamily: "monospace" }}
+        style={{
+          color: "var(--color-muted)",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "var(--font-body)",
+          fontSize: "var(--fs-xs)",
+          textAlign: "center",
+        }}
       >
         Use a different device ↓
       </button>
@@ -213,24 +270,31 @@ function ScanUI({
       className="flex flex-col gap-4"
     >
       <p
-        className="text-xs text-center leading-relaxed"
-        style={{ color: "var(--color-text-secondary)", fontFamily: "monospace" }}
+        style={{
+          color: "var(--color-text-secondary)",
+          fontFamily: "var(--font-body)",
+          fontSize: "var(--fs-sm)",
+          textAlign: "center",
+          lineHeight: 1.6,
+        }}
       >
         Scan for nearby Bluetooth devices to establish the proximity tether.
       </p>
 
-      {/* Scan button */}
+      {/* Scan button — gradient border during scanning */}
       <motion.button
         onClick={onScan}
         disabled={isPairing}
         whileHover={!isPairing ? { scale: 1.01 } : {}}
         whileTap={!isPairing ? { scale: 0.99 } : {}}
-        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold tracking-widest uppercase"
+        className={`w-full flex items-center justify-center gap-2 py-3 rounded-xl ${isPairing ? "gradient-border" : ""}`}
         style={{
-          background: isPairing ? "rgba(255,255,255,0.03)" : "var(--theme-glow)",
-          border: "1.5px solid var(--theme-border)",
+          background: isPairing ? "rgba(255,255,255,0.03)" : "linear-gradient(135deg, var(--theme-glow), color-mix(in srgb, var(--theme-primary) 15%, transparent))",
+          border: isPairing ? "1.5px solid var(--theme-border)" : "1.5px solid var(--theme-border)",
           color: isPairing ? "var(--color-muted)" : "var(--theme-primary)",
-          fontFamily: "monospace",
+          fontFamily: "var(--font-body)",
+          fontWeight: 600,
+          fontSize: "var(--fs-sm)",
           cursor: isPairing ? "wait" : "pointer",
           opacity: isPairing ? 0.65 : 1,
         }}
@@ -243,7 +307,7 @@ function ScanUI({
         ) : (
           <>
             <RefreshCw size={14} />
-            Scan for Devices
+            Scan for devices
           </>
         )}
       </motion.button>
@@ -257,51 +321,66 @@ function ScanUI({
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.25 }}
             className="rounded-xl overflow-hidden"
-            style={{ border: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.02)" }}
+            style={{ border: "1px solid var(--color-border)", background: "rgba(255,255,255,0.02)" }}
           >
             {availableDevices.map((dev) => {
               const isLast = dev.address === lastMac;
               return (
-                <button
+                <motion.button
                   key={dev.address}
                   onClick={() => onPair(dev.address, dev.name, dev.type)}
                   disabled={isPairing}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left transition-colors duration-150 hover:bg-white/[0.04]"
+                  whileHover={{ backgroundColor: "rgba(255,255,255,0.04)" }}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left"
                   style={{
-                    borderBottom: "1px solid rgba(255,255,255,0.04)",
+                    borderBottom: "1px solid var(--color-border-subtle)",
                     cursor: isPairing ? "wait" : "pointer",
+                    borderLeft: isLast ? "3px solid var(--theme-primary)" : "3px solid transparent",
+                    transition: "border-color 0.2s ease",
+                    background: "transparent",
+                    border: "none",
                   }}
                 >
                   <div className="flex items-center gap-2.5">
-                    <Bluetooth size={13} style={{ color: isLast ? "var(--theme-primary)" : "var(--color-text-secondary)" }} />
+                    <Bluetooth
+                      size={13}
+                      style={{ color: isLast ? "var(--theme-primary)" : "var(--color-text-secondary)" }}
+                    />
                     <div>
-                      <span className="text-xs font-semibold" style={{ color: "var(--color-text)" }}>
-                        {dev.name}
-                      </span>
-                      {isLast && (
-                        <span
-                          className="ml-2 text-[9px] font-bold tracking-widest uppercase px-1.5 py-0.5 rounded"
-                          style={{
-                            background: "rgba(0,212,255,0.12)",
-                            color: "var(--theme-primary)",
-                            border: "1px solid rgba(0,212,255,0.25)",
-                          }}
-                        >
-                          Quick Reconnect
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, fontFamily: "var(--font-body)", color: "var(--color-text)" }}>
+                          {dev.name}
                         </span>
-                      )}
-                      <p className="text-[10px] font-mono mt-0.5" style={{ color: "var(--color-muted)" }}>
+                        {isLast && (
+                          <span
+                            style={{
+                              fontSize: "9px",
+                              fontWeight: 700,
+                              letterSpacing: "0.08em",
+                              padding: "1px 6px",
+                              borderRadius: "4px",
+                              background: "rgba(0,212,255,0.12)",
+                              color: "var(--theme-primary)",
+                              border: "1px solid rgba(0,212,255,0.25)",
+                              fontFamily: "var(--font-body)",
+                            }}
+                          >
+                            Quick reconnect
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-mono)", color: "var(--color-muted)", marginTop: "0.1rem" }}>
                         {dev.address}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <SignalBars rssi={dev.rssi} />
-                    <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>
+                    <span style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-mono)", color: "var(--color-muted)" }}>
                       {dev.rssi} dBm
                     </span>
                   </div>
-                </button>
+                </motion.button>
               );
             })}
           </motion.div>
@@ -324,7 +403,6 @@ export default function SetupPage() {
   const [showScanUI, setShowScanUI] = useState(false);
   const [pairingSuccess, setPairingSuccess] = useState(false);
 
-  // Fetch backend BLE status on mount
   useEffect(() => {
     const check = async () => {
       try {
@@ -335,7 +413,6 @@ export default function SetupPage() {
           if (!data.connected) setShowScanUI(true);
         }
       } catch {
-        // Backend unreachable — show scan UI
         setShowScanUI(true);
       } finally {
         setLoading(false);
@@ -353,7 +430,6 @@ export default function SetupPage() {
     async (mac: string, name: string, type?: string) => {
       await pair(mac, name, type);
       setPairingSuccess(true);
-      // Give a brief moment so the user sees success, then navigate
       setTimeout(() => {
         sessionStorage.setItem(BLE_SESSION_KEY, "1");
         router.push("/dashboard");
@@ -376,63 +452,84 @@ export default function SetupPage() {
           position: "relative",
         }}
       >
-        <GridBackground />
+        {/* Animated gradient mesh — same as login for consistent flow */}
+        <GradientMesh />
 
         <motion.div
           initial={{ opacity: 0, y: 28, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] }}
+          transition={{
+            duration: 0.5,
+            ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
+          }}
           style={{
             position: "relative",
             zIndex: 1,
             width: "100%",
-            maxWidth: "420px",
-            background: "rgba(255,255,255,0.035)",
-            border: "1px solid var(--theme-border)",
+            maxWidth: "460px",
+            background: "rgba(19, 19, 26, 0.75)",
+            border: "1px solid var(--color-border)",
             borderRadius: "16px",
             padding: "2.5rem",
             backdropFilter: "blur(24px)",
             WebkitBackdropFilter: "blur(24px)",
-            boxShadow: "0 0 64px var(--theme-glow), 0 32px 64px rgba(0,0,0,0.45)",
+            boxShadow: "0 32px 64px rgba(0,0,0,0.5)",
+            overflow: "hidden",
           }}
         >
+          {/* Top-edge accent line */}
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              left: "10%",
+              right: "10%",
+              height: "1px",
+              background: "linear-gradient(90deg, transparent, var(--theme-primary), transparent)",
+              opacity: 0.6,
+            }}
+          />
+
           {/* ── Header ─────────────────────────────────────────────── */}
-          <div className="flex flex-col items-center gap-3 mb-8">
+          <div className="flex flex-col items-center gap-3 mb-6">
+            {/* Step progress indicator */}
+            <StepIndicator current={2} total={2} />
+
+            {/* Floating icon — no box */}
             <motion.div
-              animate={{
-                boxShadow: [
-                  "0 0 0px var(--theme-glow)",
-                  "0 0 24px var(--theme-glow)",
-                  "0 0 0px var(--theme-glow)",
-                ],
-              }}
+              animate={{ scale: [1, 1.04, 1] }}
               transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
               style={{
                 display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: "52px",
-                height: "52px",
-                borderRadius: "14px",
-                background: "var(--theme-glow)",
-                border: "1.5px solid var(--theme-border)",
+                color: "var(--theme-primary)",
+                filter: "drop-shadow(0 0 10px var(--theme-primary))",
               }}
             >
-              <Bluetooth size={26} color="var(--theme-primary)" strokeWidth={1.75} />
+              <Bluetooth size={36} strokeWidth={1.5} />
             </motion.div>
 
             <div className="text-center">
               <h1
-                className="text-xl font-bold"
-                style={{ color: "var(--color-text)", letterSpacing: "-0.02em" }}
+                style={{
+                  fontSize: "1.5rem",
+                  fontWeight: 700,
+                  fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
+                  color: "var(--color-text)",
+                  letterSpacing: "-0.025em",
+                }}
               >
-                BLE Tether Setup
+                BLE tether setup
               </h1>
               <p
-                className="text-[10px] uppercase tracking-[0.16em] mt-1"
-                style={{ color: "var(--color-muted)", fontFamily: "monospace" }}
+                style={{
+                  fontSize: "var(--fs-sm)",
+                  color: "var(--color-muted)",
+                  fontFamily: "var(--font-body)",
+                  marginTop: "0.3rem",
+                  opacity: 0.7,
+                }}
               >
-                Step 2 of 2 — Device Pairing
+                Establish your hardware security tether
               </p>
             </div>
           </div>
@@ -453,10 +550,7 @@ export default function SetupPage() {
                 >
                   <Radio size={22} style={{ color: "var(--theme-primary)" }} />
                 </motion.div>
-                <p
-                  className="text-xs tracking-widest uppercase"
-                  style={{ color: "var(--color-muted)", fontFamily: "monospace" }}
-                >
+                <p style={{ fontSize: "var(--fs-xs)", color: "var(--color-muted)", fontFamily: "var(--font-body)" }}>
                   Checking backend…
                 </p>
               </motion.div>
@@ -469,11 +563,8 @@ export default function SetupPage() {
                 className="flex flex-col items-center gap-3 py-6"
               >
                 <Zap size={32} style={{ color: "var(--color-success)" }} />
-                <p
-                  className="text-sm font-semibold tracking-widest uppercase"
-                  style={{ color: "var(--color-success)", fontFamily: "monospace" }}
-                >
-                  Tether Established
+                <p style={{ fontSize: "var(--fs-sm)", fontWeight: 600, fontFamily: "var(--font-body)", color: "var(--color-success)" }}>
+                  Tether established
                 </p>
               </motion.div>
             ) : bleStatus?.connected && !showScanUI ? (
@@ -500,18 +591,16 @@ export default function SetupPage() {
             style={{
               marginTop: "2rem",
               paddingTop: "1.25rem",
-              borderTop: "1px solid rgba(255,255,255,0.06)",
-              fontSize: "0.625rem",
+              borderTop: "1px solid var(--color-border-subtle)",
+              fontSize: "var(--fs-xs)",
               color: "var(--color-muted)",
-              fontFamily: "'JetBrains Mono', monospace",
-              letterSpacing: "0.04em",
-              lineHeight: 1.7,
+              fontFamily: "var(--font-body)",
+              lineHeight: 1.6,
               textAlign: "center",
+              opacity: 0.6,
             }}
           >
-            A paired device is required to unlock the dashboard.
-            <br />
-            The session ends automatically if the tether is lost.
+            A paired device is required to unlock the dashboard. The session ends automatically if the tether is lost.
           </p>
         </motion.div>
       </div>

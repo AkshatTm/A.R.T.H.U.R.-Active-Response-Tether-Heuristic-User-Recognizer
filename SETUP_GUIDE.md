@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | SentryOS |
+| **Product** | A.R.T.H.U.R. |
 | **Platforms** | Windows 10+, macOS 12+, Ubuntu 20.04+ |
 | **Last Updated** | 2026-03-02 |
 
@@ -94,12 +94,12 @@ python main.py
 **Expected console output:**
 
 ```
-HH:MM:SS  INFO      sentryos.main  ============================================================
-HH:MM:SS  INFO      sentryos.main    SentryOS AI Sensory Engine — Starting Up
-HH:MM:SS  INFO      sentryos.main  ============================================================
-HH:MM:SS  INFO      sentryos.main  Vision thread launched
+HH:MM:SS  INFO      arthur.main  ============================================================
+HH:MM:SS  INFO      arthur.main    A.R.T.H.U.R. AI Sensory Engine — Starting Up
+HH:MM:SS  INFO      arthur.main  ============================================================
+HH:MM:SS  INFO      arthur.main  Vision thread launched
 INFO:     Uvicorn running on http://0.0.0.0:8000
-HH:MM:SS  INFO      sentryos.vision  Camera 0 opened successfully
+HH:MM:SS  INFO      arthur.vision  Camera 0 opened successfully
 ```
 
 **Verify:** Open a browser or new terminal and check the health endpoint:
@@ -112,7 +112,7 @@ Invoke-WebRequest http://localhost:8000/health | Select-Object -ExpandProperty C
 curl http://localhost:8000/health
 ```
 
-Expected: `{"status":"ok","service":"SentryOS","engine":{...},"vision_thread_alive":true,...}`
+Expected: `{"status":"ok","service":"A.R.T.H.U.R.","engine":{...},"vision_thread_alive":true,...}`
 
 ### 3.2 Start the Frontend
 
@@ -325,7 +325,7 @@ The application has the following routes:
 
 ## 9. Production Considerations
 
-> SentryOS is currently designed for local development and demo use. The following changes would be required for production deployment:
+> A.R.T.H.U.R. is currently designed for local development and demo use. The following changes would be required for production deployment:
 
 | Area | Current | Production Requirement |
 |------|---------|----------------------|

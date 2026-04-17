@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | SentryOS — AI-Powered Zero-Trust Physical Endpoint Security |
+| **Product** | A.R.T.H.U.R. — AI-Powered Zero-Trust Physical Endpoint Security |
 | **Version** | 2.0.0 |
 | **Status** | Feature-Complete |
 | **Last Updated** | 2026-03-02 |
@@ -13,7 +13,7 @@
 
 ## 1. Executive Summary
 
-SentryOS is a proactive, zero-trust physical endpoint security system designed to mitigate threats that traditional software-only security perimeters cannot address. It uses edge-compute computer vision, Bluetooth Low Energy proximity tethering, and adaptive UI obfuscation to continuously verify the physical security of a remote workspace — all processed locally with zero cloud dependency.
+A.R.T.H.U.R. is a proactive, zero-trust physical endpoint security system designed to mitigate threats that traditional software-only security perimeters cannot address. It uses edge-compute computer vision, Bluetooth Low Energy proximity tethering, and adaptive UI obfuscation to continuously verify the physical security of a remote workspace — all processed locally with zero cloud dependency.
 
 The system operates as a modular monolith: a Python-based AI sensory engine (FastAPI) communicates with a Next.js reactive frontend over local WebSockets, delivering sub-250ms threat response times.
 

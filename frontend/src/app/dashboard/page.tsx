@@ -1,33 +1,40 @@
 /**
- * Dashboard — SentryOS Master Integration Route (Phase 4)
+ * Dashboard — A.R.T.H.U.R. Master Integration Route (Phase 4)
+ *
+ * UI Redesign per Enhancement Master Plan:
+ * - TopBar: h-12 (48px), "S" lettermark, Satoshi wordmark, simplified badge (dot + text),
+ *   status cluster (3 dots with tooltips), icon-only sign out button
+ * - MetricCards: TiltCard 3D hover, no HUD corners, no shimmer, hero-only accent line,
+ *   icon directly on card (no box), IBM Plex Mono values via NumberFlip
+ * - Terminal: tabs decoration, warmer bg #0c0e14, alternating rows, removed "LIVE" text
+ * - Code Panel: static red dot for RESTRICTED, Catppuccin-inspired token colors
+ * - Security Events: no blinking badge, striped rows, static red dot for Active status
+ * - Server Health: horizontal bar layout, 4px gradient bars, region inline, only degraded pulses
+ * - Removed: ScanLineOverlay, HudCorners component, all shimmer classes
  *
  * Component tree:
- *   <PresentationModeProvider>   — keyboard override engine + corner toast
- *     <DashboardInner>           — sensor hooks + override resolution
- *       <ChameleonWrapper>       — CSS variable injection, no DOM
+ *   <PresentationModeProvider>
+ *     <DashboardInner>
+ *       <ChameleonWrapper>
  *         <div root>
- *           <SecurityTopBar />   — FIXED, ALWAYS VISIBLE, outside blur
- *           [OverrideStrip]      — subtle yellow band when override is active
- *           <GlassOverlay>       — blur/grayscale filter driven by finalSecurityState
+ *           <SecurityTopBar /> — FIXED, ALWAYS VISIBLE, outside blur
+ *           [OverrideStrip]   — subtle yellow band when override is active
+ *           <GlassOverlay>
  *             <DashboardContent />
  *           </GlassOverlay>
  *           <AnimatePresence>
- *             <LockScreen />     — conditionally mounted via finalSecurityState
+ *             <LockScreen />  — conditionally mounted
  *           </AnimatePresence>
  *         </div>
  *       </ChameleonWrapper>
  *     </DashboardInner>
  *   </PresentationModeProvider>
- *
- * Auth: useAuthGuard() in DashboardPage redirects to / if sessionStorage sentinel absent.
- * Override: finalSecurityState = overrideState ?? securityState  (presenter keyboard wins).
- * Hook call order: useAuthGuard → PresentationModeProvider → DashboardInner hooks.
  */
 
 "use client";
 
-import { memo, useCallback } from "react";
-import { AnimatePresence } from "framer-motion";
+import { memo, useCallback, useState, useEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Activity,
   AlertTriangle,
@@ -56,6 +63,8 @@ import {
 import { ChameleonWrapper } from "@/components/ChameleonWrapper";
 import { GlassOverlay } from "@/components/GlassOverlay";
 import { LockScreen } from "@/components/LockScreen";
+import { TiltCard } from "@/components/TiltCard";
+import { NumberFlip } from "@/components/NumberFlip";
 import { useSecurityState, type SecurityState } from "@/hooks/useSecurityState";
 import { PresentationModeProvider, usePresentationMode } from "@/context/PresentationModeContext";
 import { useAuthGuard, logout } from "@/hooks/useAuthGuard";
@@ -63,7 +72,7 @@ import { useBleAutoLogout } from "@/hooks/useBleAutoLogout";
 import { useRouter } from "next/navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mock Enterprise Data (module-level constants — stable, never re-created)
+// Mock Enterprise Data
 // ─────────────────────────────────────────────────────────────────────────────
 
 const METRICS = [
@@ -76,6 +85,7 @@ const METRICS = [
     trend: "up" as const,
     icon: DollarSign,
     note: "vs Q1-2025",
+    isHero: true,
   },
   {
     id: "sessions",
@@ -86,6 +96,7 @@ const METRICS = [
     trend: "up" as const,
     icon: Users,
     note: "across 14 regions",
+    isHero: false,
   },
   {
     id: "latency",
@@ -96,6 +107,7 @@ const METRICS = [
     trend: "down" as const,
     icon: Zap,
     note: "Frankfurt edge node",
+    isHero: false,
   },
   {
     id: "threat",
@@ -106,11 +118,12 @@ const METRICS = [
     trend: "neutral" as const,
     icon: Shield,
     note: "Last scan 4 min ago",
+    isHero: false,
   },
 ];
 
 const TERMINAL_LINES = [
-  { time: "09:14:20", level: "INFO",  msg: "SentryOS kernel v3.1.0 boot sequence complete" },
+  { time: "09:14:20", level: "INFO",  msg: "A.R.T.H.U.R. kernel v3.1.0 boot sequence complete" },
   { time: "09:14:21", level: "INFO",  msg: "JWT auth middleware loaded — RS256 / 15m TTL" },
   { time: "09:14:22", level: "INFO",  msg: "DB connection pool established: 10/50 active" },
   { time: "09:14:22", level: "INFO",  msg: "Vault secret rotation acknowledged — 0 stale refs" },
@@ -134,8 +147,9 @@ const SECURITY_EVENTS = [
   { id: "EVT-2287", timestamp: "08:44:00", event: "Scheduled Cert Renewal",       severity: "INFO",     actor: "cert-bot@corp.io",   resolved: true  },
 ];
 
+// Catppuccin Mocha-inspired token colors — warmer, more cohesive
 const CODE_LINES: { tokens: { t: string; v: string }[] }[] = [
-  { tokens: [{ t: "comment", v: "// CONFIDENTIAL — SentryOS Zero-Trust Auth Service" }] },
+  { tokens: [{ t: "comment", v: "// CONFIDENTIAL — A.R.T.H.U.R. Zero-Trust Auth Service" }] },
   { tokens: [{ t: "comment", v: "// access_level: RESTRICTED | clearance: L4+" }] },
   { tokens: [] },
   { tokens: [{ t: "keyword", v: "export async function " }, { t: "fn", v: "validatePhysicalPresence" }, { t: "plain", v: "(" }] },
@@ -165,28 +179,118 @@ const CODE_LINES: { tokens: { t: string; v: string }[] }[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STATE_CONFIG: Record<SecurityState, { label: string; color: string; pulse: boolean }> = {
-  SECURE:  { label: "SECURE",  color: "var(--color-success)", pulse: false },
-  BLURRED: { label: "BLURRED", color: "var(--color-warning)", pulse: true  },
-  LOCKED:  { label: "LOCKED",  color: "var(--color-danger)",  pulse: true  },
+  SECURE:  { label: "Secure",  color: "var(--color-success)", pulse: false },
+  BLURRED: { label: "Blurred", color: "var(--color-warning)", pulse: true  },
+  LOCKED:  { label: "Locked",  color: "var(--color-danger)",  pulse: true  },
 };
 
+// ── Live Clock ────────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [time, setTime] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const hh = time.getHours().toString().padStart(2, "0");
+  const mm = time.getMinutes().toString().padStart(2, "0");
+  const ss = time.getSeconds().toString().padStart(2, "0");
+  return (
+    <div
+      className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-mono tabular-nums select-none"
+      style={{
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        color: "var(--color-text-secondary)",
+        letterSpacing: "0.05em",
+      }}
+    >
+      <Clock size={10} style={{ color: "var(--theme-primary)", flexShrink: 0 }} />
+      <span style={{ color: "var(--color-text)" }}>{hh}:{mm}</span>
+      <motion.span
+        key={ss}
+        initial={{ opacity: 0.3 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+        style={{ color: "var(--color-muted)" }}
+      >
+        :{ss}
+      </motion.span>
+    </div>
+  );
+}
+
+// ── Security State Badge — simplified: dot + text, no pill bg ────────────────
 function SecurityStateBadge({ state }: { state: SecurityState }) {
   const cfg = STATE_CONFIG[state];
   return (
-    <div
-      className="flex items-center gap-2 px-3 py-1 rounded-full"
-      style={{
-        background: `color-mix(in srgb, ${cfg.color} 12%, transparent)`,
-        border:     `1px solid color-mix(in srgb, ${cfg.color} 35%, transparent)`,
-      }}
-    >
+    <div className="flex items-center gap-2">
       <span
-        className={`w-2 h-2 rounded-full ${cfg.pulse ? "animate-pulse" : ""}`}
-        style={{ background: cfg.color, boxShadow: `0 0 6px ${cfg.color}` }}
+        className={`w-1.5 h-1.5 rounded-full ${cfg.pulse ? "animate-pulse" : ""}`}
+        style={{ background: cfg.color, boxShadow: `0 0 5px ${cfg.color}`, flexShrink: 0 }}
       />
-      <span className="text-xs font-semibold tracking-widest" style={{ color: cfg.color }}>
+      <span
+        style={{
+          fontSize: "var(--fs-xs)",
+          fontFamily: "var(--font-body)",
+          fontWeight: 600,
+          color: cfg.color,
+          letterSpacing: "0.02em",
+        }}
+      >
         {cfg.label}
       </span>
+    </div>
+  );
+}
+
+// ── Sensor Status Dot — for the status cluster ────────────────────────────────
+function SensorDot({
+  color,
+  tooltip,
+  icon: Icon,
+  iconSize = 10,
+}: {
+  color: string;
+  tooltip: string;
+  icon: React.ElementType;
+  iconSize?: number;
+}) {
+  const [showTip, setShowTip] = useState(false);
+  return (
+    <div
+      className="relative flex items-center"
+      onMouseEnter={() => setShowTip(true)}
+      onMouseLeave={() => setShowTip(false)}
+    >
+      <Icon size={iconSize} style={{ color }} />
+      <AnimatePresence>
+        {showTip && (
+          <motion.div
+            initial={{ opacity: 0, y: 4, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 4, scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 6px)",
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "var(--color-surface-raised)",
+              border: "1px solid var(--color-border)",
+              borderRadius: "6px",
+              padding: "3px 8px",
+              fontSize: "10px",
+              fontFamily: "var(--font-body)",
+              color: "var(--color-text-secondary)",
+              whiteSpace: "nowrap",
+              zIndex: 100,
+              boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+            }}
+          >
+            {tooltip}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -202,162 +306,217 @@ interface SecurityTopBarProps {
   onLogout: () => void;
 }
 
+// ── Security Top Bar — h-12, "S" lettermark, simplified ─────────────────────
 const SecurityTopBar = memo(function SecurityTopBar({
   securityState, isConnected, faceCount, isDisconnected,
   deviceName, dominantColor, requestPairing, onLogout,
 }: SecurityTopBarProps) {
+  const [showLogoutText, setShowLogoutText] = useState(false);
+
   return (
-    <header
-      className="fixed top-0 left-0 right-0 h-14 z-40 flex items-center justify-between px-6 gap-4"
+    <motion.header
+      initial={{ y: -48, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] }}
+      className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-6 gap-4"
       style={{
-        background: "rgba(13,13,13,0.85)",
-        borderBottom: "1px solid var(--theme-border)",
-        backdropFilter: "blur(12px)",
-        WebkitBackdropFilter: "blur(12px)",
+        height: "48px",
+        // Gradient bottom border instead of solid
+        background: "rgba(10,10,15,0.90)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        borderBottom: "1px solid transparent",
+        backgroundImage: "linear-gradient(rgba(10,10,15,0.90), rgba(10,10,15,0.90)), linear-gradient(90deg, transparent, var(--color-border), transparent)",
+        backgroundOrigin: "border-box",
+        backgroundClip: "padding-box, border-box",
+        boxShadow: "0 1px 0 0 var(--color-border-subtle)",
       }}
     >
-      {/* Wordmark */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div
-          className="flex items-center justify-center w-7 h-7 rounded"
-          style={{ background: "var(--theme-glow)", border: "1px solid var(--theme-border)" }}
+      {/* "S" lettermark + Wordmark */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        {/* "S" in display font — subtle pulse, no rotate */}
+        <motion.div
+          animate={{ opacity: [0.85, 1, 0.85] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+          style={{
+            width: "24px",
+            height: "24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
+            fontWeight: 900,
+            fontSize: "1rem",
+            color: "var(--theme-primary)",
+            letterSpacing: "-0.05em",
+            lineHeight: 1,
+          }}
         >
-          <Eye size={14} style={{ color: "var(--theme-primary)" }} />
-        </div>
+          S
+        </motion.div>
+        {/* Satoshi Bold, mixed case — no version number */}
         <span
-          className="text-sm font-semibold tracking-widest uppercase"
-          style={{ color: "var(--color-text)", fontFamily: "monospace" }}
+          style={{
+            fontSize: "var(--fs-sm)",
+            fontWeight: 700,
+            fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
+            color: "var(--color-text)",
+            letterSpacing: "-0.01em",
+          }}
         >
-          SentryOS
-        </span>
-        <span className="hidden sm:block text-xs" style={{ color: "var(--color-muted)" }}>
-          Zero-Trust Terminal v3.0
+          A.R.T.H.U.R.
         </span>
       </div>
 
-      {/* Security state badge */}
+      {/* Security state badge — simplified (dot + text only) */}
       <SecurityStateBadge state={securityState} />
 
-      {/* Right sensor chips */}
-      <div className="flex items-center gap-2 shrink-0">
-        <div
-          className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: isConnected ? "var(--color-success)" : "var(--color-muted)",
-          }}
-        >
-          {isConnected ? <Wifi size={11} /> : <WifiOff size={11} />}
-          <span className="ml-1">WS</span>
-        </div>
-        <div
-          className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: faceCount === 1 ? "var(--color-success)" : faceCount === 0 ? "var(--color-warning)" : "var(--color-muted)",
-          }}
-        >
-          <Eye size={11} />
-          <span className="ml-1">{faceCount === null ? "—" : faceCount}</span>
-        </div>
-        {dominantColor && (
-          <div
-            className="hidden md:block w-5 h-5 rounded-full ring-1 ring-white/10 shrink-0"
-            style={{ background: dominantColor }}
-            title={`Dominant color: ${dominantColor}`}
-          />
-        )}
-        {isDisconnected ? (
-          <button
-            onClick={() => requestPairing()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer"
-            style={{
-              background: "rgba(239,68,68,0.12)",
-              border: "1px solid rgba(239,68,68,0.3)",
-              color: "var(--color-danger)",
-            }}
-          >
-            <BluetoothOff size={11} />
-            <span className="ml-1">Pair</span>
-          </button>
-        ) : (
-          <div
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs"
-            style={{
-              background: "rgba(34,197,94,0.08)",
-              border: "1px solid rgba(34,197,94,0.25)",
-              color: "var(--color-success)",
-            }}
-          >
-            <Bluetooth size={11} />
-            <span className="ml-1 max-w-[80px] truncate">{deviceName ?? "Tethered"}</span>
-          </div>
-        )}
+      {/* Right cluster */}
+      <div className="flex items-center gap-3 shrink-0">
+        <LiveClock />
 
-        {/* Sign Out button */}
-        <button
-          onClick={onLogout}
-          title="Sign Out"
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs cursor-pointer transition-colors duration-150"
+        {/* Status cluster — 3 colored dots with tooltips */}
+        <div
+          className="hidden md:flex items-center gap-2.5 px-2.5 py-1 rounded-md"
           style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.05)",
+          }}
+        >
+          <SensorDot
+            icon={isConnected ? Wifi : WifiOff}
+            color={isConnected ? "var(--color-success)" : "var(--color-muted)"}
+            tooltip={isConnected ? "WebSocket: Live" : "WebSocket: Offline"}
+          />
+          <SensorDot
+            icon={Eye}
+            color={
+              faceCount === 1
+                ? "var(--color-success)"
+                : faceCount === 0
+                ? "var(--color-warning)"
+                : "var(--color-muted)"
+            }
+            tooltip={
+              faceCount === null
+                ? "Face detection: —"
+                : `${faceCount} face${faceCount !== 1 ? "s" : ""} detected`
+            }
+          />
+          <SensorDot
+            icon={isDisconnected ? BluetoothOff : Bluetooth}
+            color={isDisconnected ? "var(--color-danger)" : "var(--color-success)"}
+            tooltip={isDisconnected ? "BLE: Disconnected" : `BLE: ${deviceName ?? "Tethered"}`}
+          />
+        </div>
+
+        {/* Sign Out — icon-only by default, text slides in on hover */}
+        <motion.button
+          onClick={onLogout}
+          onMouseEnter={() => setShowLogoutText(true)}
+          onMouseLeave={() => setShowLogoutText(false)}
+          title="Sign Out"
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md cursor-pointer transition-all duration-200"
+          whileHover={{
+            backgroundColor: "rgba(244,63,94,0.10)",
+            borderColor: "rgba(244,63,94,0.3)",
+          }}
+          style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.06)",
             color: "var(--color-muted)",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.10)";
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--color-danger)";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(239,68,68,0.3)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.04)";
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--color-muted)";
-            (e.currentTarget as HTMLButtonElement).style.borderColor = "rgba(255,255,255,0.08)";
           }}
         >
           <LogOut size={11} />
-          <span className="hidden sm:inline ml-1">Sign Out</span>
-        </button>
+          <AnimatePresence>
+            {showLogoutText && (
+              <motion.span
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: "auto" }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.18 }}
+                style={{
+                  fontSize: "var(--fs-xs)",
+                  fontFamily: "var(--font-body)",
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  color: "var(--color-danger)",
+                }}
+              >
+                Sign out
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </motion.button>
       </div>
-    </header>
+    </motion.header>
   );
 });
 
-const MetricCard = memo(function MetricCard({ label, value, sub, delta, trend, icon: Icon, note }: (typeof METRICS)[number]) {
+// ── Metric Card — 3D tilt, no HUD corners, no shimmer, hero-only accent line ──
+const MetricCard = memo(function MetricCard({
+  label, value, sub, delta, trend, icon: Icon, note, index = 0, isHero = false,
+}: (typeof METRICS)[number] & { index?: number }) {
   const TrendIcon = trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Activity;
-  const trendColor = trend === "up" ? "var(--color-success)" : trend === "down" ? "var(--color-warning)" : "var(--color-muted)";
+  const trendColor =
+    trend === "up" ? "var(--color-success)"
+    : trend === "down" ? "var(--color-warning)"
+    : "var(--color-muted)";
+
   return (
-    <div
+    <TiltCard
       className="relative flex flex-col gap-3 p-5 rounded-xl overflow-hidden"
-      style={{ background: "var(--color-surface)", border: "1px solid var(--theme-border)" }}
+      style={{
+        background: "var(--color-surface)",
+        border: "1px solid var(--color-border)",
+        transition: "border-color 0.3s ease",
+      }}
     >
-      <div className="absolute top-0 left-0 right-0 h-px" style={{ background: "var(--theme-primary)", opacity: 0.6 }} />
-      <div className="flex items-start justify-between">
+      {/* Top accent line — ONLY on the hero metric card */}
+      {isHero && (
         <div
-          className="flex items-center justify-center w-8 h-8 rounded-lg"
-          style={{ background: "var(--theme-glow)", border: "1px solid var(--theme-border)" }}
+          className="absolute top-0 left-0 right-0 h-[1px]"
+          style={{
+            background: "linear-gradient(90deg, transparent, var(--theme-primary), transparent)",
+            opacity: 0.6,
+          }}
+        />
+      )}
+
+      {/* Row: icon + delta badge */}
+      <div className="relative flex items-start justify-between" style={{ zIndex: 2 }}>
+        {/* Icon directly on card, no box, text-secondary color */}
+        <Icon size={20} style={{ color: "var(--color-text-secondary)", flexShrink: 0, marginTop: "1px" }} />
+        <div
+          className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+          style={{
+            background: `color-mix(in srgb, ${trendColor} 10%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${trendColor} 25%, transparent)`,
+            color: trendColor,
+          }}
         >
-          <Icon size={15} style={{ color: "var(--theme-primary)" }} />
-        </div>
-        <div className="flex items-center gap-1 text-xs font-medium" style={{ color: trendColor }}>
-          <TrendIcon size={11} />
-          <span>{delta}</span>
+          <TrendIcon size={9} />
+          <span style={{ fontFamily: "var(--font-body)", fontSize: "var(--fs-xs)" }}>{delta}</span>
         </div>
       </div>
-      <div>
-        <div className="flex items-baseline gap-0.5">
-          <span className="text-2xl font-bold tracking-tight" style={{ color: "var(--color-text)" }}>{value}</span>
-          <span className="text-sm font-medium" style={{ color: "var(--color-muted)" }}>{sub}</span>
-        </div>
-        <p className="text-xs font-medium mt-0.5" style={{ color: "var(--color-text-secondary)" }}>{label}</p>
-        <p className="text-[10px] mt-1" style={{ color: "var(--color-muted)" }}>{note}</p>
+
+      {/* Value + label */}
+      <div className="relative" style={{ zIndex: 2 }}>
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: index * 0.08 + 0.18, duration: 0.4 }}
+        >
+          <NumberFlip value={value} sub={sub} />
+        </motion.div>
+        <p className="text-xs font-medium mt-0.5" style={{ color: "var(--color-text-secondary)", fontFamily: "var(--font-body)" }}>{label}</p>
+        <p className="text-[10px] mt-1" style={{ color: "var(--color-muted)", fontFamily: "var(--font-body)" }}>{note}</p>
       </div>
-    </div>
+    </TiltCard>
   );
 });
 
+// ── Terminal Panel ─────────────────────────────────────────────────────────────
 const LEVEL_COLORS: Record<string, string> = {
   INFO:  "var(--color-success)",
   WARN:  "var(--color-warning)",
@@ -365,68 +524,191 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 const TerminalPanel = memo(function TerminalPanel({ isConnected }: { isConnected: boolean }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<"system" | "network">("system");
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, []);
+
   return (
-    <div className="flex flex-col rounded-xl overflow-hidden h-full" style={{ background: "#080b10", border: "1px solid rgba(255,255,255,0.07)" }}>
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: 0.35 }}
+      className="flex flex-col rounded-xl overflow-hidden h-full"
+      // Slightly warmer terminal bg
+      style={{ background: "#0c0e14", border: "1px solid var(--color-border)" }}
+    >
+      {/* Title bar with traffic lights + tabs */}
       <div className="flex items-center gap-2 px-4 py-2.5 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+        {/* Traffic lights — non-interactive */}
         <div className="flex items-center gap-1.5">
-          <span className="w-3 h-3 rounded-full bg-danger opacity-80" />
-          <span className="w-3 h-3 rounded-full bg-warning opacity-80" />
-          <span className="w-3 h-3 rounded-full bg-success opacity-80" />
+          <span className="w-3 h-3 rounded-full" style={{ background: "var(--color-danger)", opacity: 0.8 }} />
+          <span className="w-3 h-3 rounded-full" style={{ background: "var(--color-warning)", opacity: 0.8 }} />
+          <span className="w-3 h-3 rounded-full" style={{ background: "var(--color-success)", opacity: 0.8 }} />
         </div>
-        <Terminal size={12} className="ml-2" style={{ color: "var(--color-muted)" }} />
-        <span className="text-xs font-mono" style={{ color: "var(--color-muted)" }}>sentry-node-07 — system.log</span>
+
+        {/* Decorative tabs */}
+        <div className="ml-3 flex items-center gap-1">
+          {(["system", "network"] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                background: activeTab === tab ? "rgba(255,255,255,0.06)" : "transparent",
+                border: "none",
+                borderRadius: "4px",
+                padding: "2px 8px",
+                cursor: "pointer",
+                fontSize: "10px",
+                fontFamily: "var(--font-mono)",
+                color: activeTab === tab ? "var(--color-text-secondary)" : "var(--color-muted)",
+                transition: "all 0.15s ease",
+              }}
+            >
+              {tab}.log
+            </button>
+          ))}
+        </div>
+
+        {/* Live indicator — just the pulsing dot, no "LIVE" text */}
         <div className="ml-auto flex items-center gap-1.5">
-          <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? "animate-pulse" : ""}`}
-            style={{ background: isConnected ? "var(--color-success)" : "var(--color-muted)" }} />
-          <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>{isConnected ? "LIVE" : "OFFLINE"}</span>
+          {isConnected && (
+            <motion.span
+              animate={{ scale: [1, 1.5, 1], opacity: [1, 0.4, 1] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: "easeInOut" }}
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ background: "var(--color-success)" }}
+            />
+          )}
+          {!isConnected && (
+            <span className="text-[10px] font-mono" style={{ color: "var(--color-muted)" }}>
+              ○ OFFLINE
+            </span>
+          )}
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-3 space-y-0.5" style={{ maxHeight: "260px" }}>
+
+      {/* Log lines — with alternating row backgrounds + scanlines texture */}
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto terminal-scanlines"
+        style={{ scrollBehavior: "smooth" }}
+      >
         {TERMINAL_LINES.map((line, i) => (
-          <div key={i} className="flex gap-2 font-mono text-[11px] leading-relaxed">
-            <span style={{ color: "var(--color-muted)", userSelect: "none" }}>[{line.time}]</span>
-            <span className="font-semibold w-10 shrink-0 text-right" style={{ color: LEVEL_COLORS[line.level] ?? "var(--color-muted)" }}>{line.level}</span>
-            <span style={{ color: "var(--color-text-secondary)" }}>{line.msg}</span>
-          </div>
+          <motion.div
+            key={i}
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: 0.4 + i * 0.045 }}
+            className="flex gap-2 font-mono text-[11px] leading-relaxed px-3 py-0.5"
+            style={{
+              background: i % 2 === 0 ? "rgba(255,255,255,0.015)" : "transparent",
+              // ERROR lines get a subtle left-border accent
+              borderLeft: line.level === "ERROR" ? "2px solid var(--color-danger)" : "2px solid transparent",
+            }}
+          >
+            <span style={{ color: "var(--color-muted)", userSelect: "none", flexShrink: 0 }}>[{line.time}]</span>
+            <span
+              className="font-semibold shrink-0"
+              style={{ color: LEVEL_COLORS[line.level] ?? "var(--color-muted)", width: "38px", textAlign: "left" }}
+            >
+              {line.level}
+            </span>
+            <span style={{
+              color: line.level === "ERROR"
+                ? "var(--color-danger)"
+                : line.level === "WARN"
+                ? "var(--color-warning)"
+                : "var(--color-text-secondary)"
+            }}>
+              {line.msg}
+            </span>
+          </motion.div>
         ))}
-        <div className="flex gap-2 font-mono text-[11px] leading-relaxed">
-          <span style={{ color: "var(--color-muted)" }}>root@sentry-node-07 ~ %&nbsp;</span>
-          <span className="animate-pulse" style={{ color: "var(--theme-primary)" }}>▊</span>
-        </div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 + TERMINAL_LINES.length * 0.045 + 0.2 }}
+          className="flex gap-2 font-mono text-[11px] leading-relaxed mt-1 px-3 py-0.5"
+        >
+          <span style={{ color: "var(--theme-primary)", opacity: 0.6 }}>root@sentry-node-07</span>
+          <span style={{ color: "var(--color-muted)" }}>~</span>
+          <span style={{ color: "var(--color-text-secondary)" }}>%</span>
+          <span className="animate-blink-cursor ml-0.5" style={{ color: "var(--theme-primary)" }}>▊</span>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 });
 
+// Catppuccin Mocha-inspired token colors — warmer, more cohesive
 const TOKEN_COLORS: Record<string, string> = {
-  comment: "#6b7280", keyword: "#c792ea", fn: "#82aaff",
-  type: "#ffcb6b", str: "#c3e88d", num: "#f78c6c", plain: "#e0e0e0",
+  comment: "#585b70",  // surface2 — quiet
+  keyword: "#cba6f7",  // mauve
+  fn:      "#89b4fa",  // blue
+  type:    "#f9e2af",  // yellow
+  str:     "#a6e3a1",  // green
+  num:     "#fab387",  // peach
+  plain:   "#cdd6f4",  // text
 };
 
+// ── Code Panel ──────────────────────────────────────────────────────────────
 const CodePanel = memo(function CodePanel() {
   return (
-    <div className="flex flex-col rounded-xl overflow-hidden h-full" style={{ background: "#080b10", border: "1px solid rgba(255,255,255,0.07)" }}>
+    <div className="flex flex-col rounded-xl overflow-hidden h-full" style={{ background: "#0c0e14", border: "1px solid var(--color-border)" }}>
       <div className="flex items-center gap-2 px-4 py-2.5 shrink-0" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
         <Code2 size={12} style={{ color: "var(--color-muted)" }} />
         <span className="text-xs font-mono" style={{ color: "var(--color-muted)" }}>auth/validatePresence.ts</span>
-        <span className="ml-auto text-[9px] font-semibold tracking-widest px-1.5 py-0.5 rounded"
-          style={{ background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.35)", color: "var(--color-danger)" }}>
-          RESTRICTED L4+
-        </span>
+        {/* Static red dot — not flashing */}
+        <div className="ml-auto flex items-center gap-1.5">
+          <span
+            className="w-1.5 h-1.5 rounded-full"
+            style={{ background: "var(--color-danger)" }}
+          />
+          <span
+            className="text-[9px] font-semibold tracking-widest"
+            style={{ color: "var(--color-danger)", fontFamily: "var(--font-body)" }}
+          >
+            RESTRICTED L4+
+          </span>
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto" style={{ maxHeight: "260px" }}>
+      <div className="flex-1 overflow-y-auto terminal-scanlines" style={{ background: "#0c0e14" }}>
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
           <tbody>
             {CODE_LINES.map((line, i) => (
-              <tr key={i} className="hover:bg-white/[0.02] transition-colors">
-                <td className="pl-3 pr-4 text-right text-[10px] font-mono select-none w-8 shrink-0"
-                  style={{ color: "rgba(107,114,128,0.5)", verticalAlign: "top", paddingTop: "1px" }}>
+              <tr
+                key={i}
+                // Static highlight on the security check line (line 12 = index 11)
+                style={{
+                  background: i === 11
+                    ? `color-mix(in srgb, var(--theme-primary) 4%, transparent)`
+                    : "transparent",
+                }}
+              >
+                <td
+                  className="pl-3 pr-4 text-right select-none"
+                  style={{
+                    fontSize: "11px",
+                    fontFamily: "var(--font-mono)",
+                    // 35% opacity line numbers
+                    color: "rgba(88, 91, 112, 0.55)",
+                    verticalAlign: "top",
+                    paddingTop: "1px",
+                    width: "32px",
+                    minWidth: "32px",
+                  }}
+                >
                   {i + 1}
                 </td>
                 <td className="pr-4 py-px">
                   <span className="font-mono text-[11px] leading-relaxed">
                     {line.tokens.map((tok, j) => (
-                      <span key={j} style={{ color: TOKEN_COLORS[tok.t] ?? "#e0e0e0" }}>{tok.v}</span>
+                      <span key={j} style={{ color: TOKEN_COLORS[tok.t] ?? "#cdd6f4" }}>{tok.v}</span>
                     ))}
                     {line.tokens.length === 0 && <>&nbsp;</>}
                   </span>
@@ -440,71 +722,131 @@ const CodePanel = memo(function CodePanel() {
   );
 });
 
-const SEVERITY_STYLE: Record<string, { bg: string; color: string }> = {
-  CRITICAL: { bg: "rgba(239,68,68,0.15)",  color: "var(--color-danger)"  },
-  HIGH:     { bg: "rgba(245,158,11,0.18)", color: "var(--color-warning)" },
-  MEDIUM:   { bg: "rgba(0,212,255,0.12)",  color: "var(--color-accent)"  },
-  INFO:     { bg: "rgba(107,114,128,0.15)",color: "var(--color-muted)"   },
+// ── Security Events Table ──────────────────────────────────────────────────
+const SEVERITY_STYLE: Record<string, { bg: string; color: string; size?: string }> = {
+  CRITICAL: { bg: "rgba(244,63,94,0.15)",  color: "var(--color-danger)",  size: "11px" },
+  HIGH:     { bg: "rgba(245,166,35,0.18)", color: "var(--color-warning)", size: "10px" },
+  MEDIUM:   { bg: "rgba(0,212,255,0.12)",  color: "var(--color-accent)",  size: "10px" },
+  INFO:     { bg: "rgba(90,90,110,0.15)",  color: "var(--color-muted)",   size: "9px"  },
 };
+
+const UNRESOLVED_COUNT = SECURITY_EVENTS.filter(e => !e.resolved).length;
 
 const SecurityEventsTable = memo(function SecurityEventsTable() {
   return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "var(--color-surface)", border: "1px solid var(--theme-border)" }}>
-      <div className="flex items-center gap-2 px-5 py-3" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-        <ShieldAlert size={13} style={{ color: "var(--theme-primary)" }} />
-        <span className="text-xs font-semibold tracking-wide" style={{ color: "var(--color-text)" }}>Security Event Log</span>
-        <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full"
-          style={{ background: "rgba(239,68,68,0.12)", color: "var(--color-danger)", border: "1px solid rgba(239,68,68,0.25)" }}>
-          2 UNRESOLVED
-        </span>
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: 0.55 }}
+      className="rounded-xl overflow-hidden"
+      style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+    >
+      {/* Header — title only, unresolved count moved to filter row */}
+      <div className="px-5 py-3" style={{ borderBottom: "1px solid var(--color-border-subtle)" }}>
+        <div className="flex items-center gap-2 mb-2">
+          <ShieldAlert size={13} style={{ color: "var(--theme-primary)" }} />
+          <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, fontFamily: "var(--font-body)", color: "var(--color-text)" }}>
+            Security Event Log
+          </span>
+        </div>
+        {/* Filter/tab row with unresolved count */}
+        <div className="flex items-center gap-2">
+          <span
+            className="px-2 py-0.5 rounded text-[10px] font-medium"
+            style={{
+              background: "rgba(244,63,94,0.1)",
+              color: "var(--color-danger)",
+              border: "1px solid rgba(244,63,94,0.2)",
+              fontFamily: "var(--font-body)",
+            }}
+          >
+            {UNRESOLVED_COUNT} unresolved
+          </span>
+          <span
+            className="px-2 py-0.5 rounded text-[10px] font-medium"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              color: "var(--color-muted)",
+              fontFamily: "var(--font-body)",
+            }}
+          >
+            All events
+          </span>
+        </div>
       </div>
+
       <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs table-striped">
           <thead>
-            <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+            <tr style={{ borderBottom: "1px solid var(--color-border-subtle)" }}>
               {["ID", "Time", "Event", "Severity", "Actor", "Status"].map((h) => (
-                <th key={h} className="px-5 py-2.5 text-left font-medium tracking-wide text-[10px] uppercase"
-                  style={{ color: "var(--color-muted)" }}>{h}</th>
+                <th
+                  key={h}
+                  className="px-5 py-2.5 text-left font-medium uppercase"
+                  style={{ fontSize: "var(--fs-xs)", color: "var(--color-muted)", fontFamily: "var(--font-body)", letterSpacing: "0.06em" }}
+                >
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {SECURITY_EVENTS.map((evt) => {
+            {SECURITY_EVENTS.map((evt, i) => {
               const sev = SEVERITY_STYLE[evt.severity] ?? SEVERITY_STYLE.INFO;
               return (
-                <tr key={evt.id} className="transition-colors duration-150 hover:bg-white/[0.025]"
-                  style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                  <td className="px-5 py-3 font-mono" style={{ color: "var(--color-muted)" }}>{evt.id}</td>
-                  <td className="px-5 py-3 font-mono whitespace-nowrap" style={{ color: "var(--color-text-secondary)" }}>
+                <motion.tr
+                  key={evt.id}
+                  initial={{ opacity: 0, y: -6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.3, delay: 0.6 + i * 0.07 }}
+                  whileHover={{ backgroundColor: "rgba(255,255,255,0.025)" }}
+                  style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}
+                >
+                  <td className="px-5 py-3 font-mono" style={{ color: "var(--color-muted)", fontSize: "var(--fs-xs)" }}>{evt.id}</td>
+                  <td className="px-5 py-3 font-mono whitespace-nowrap" style={{ color: "var(--color-text-secondary)", fontSize: "var(--fs-xs)" }}>
                     <Clock size={10} className="inline mr-1.5 opacity-50" />{evt.timestamp}
                   </td>
-                  <td className="px-5 py-3" style={{ color: "var(--color-text)" }}>{evt.event}</td>
+                  <td className="px-5 py-3" style={{ color: "var(--color-text)", fontFamily: "var(--font-body)", fontSize: "var(--fs-xs)" }}>{evt.event}</td>
                   <td className="px-5 py-3">
-                    <span className="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded-full"
-                      style={{ background: sev.bg, color: sev.color }}>{evt.severity}</span>
+                    <span
+                      className="font-semibold px-2 py-0.5 rounded-full"
+                      style={{
+                        background: sev.bg,
+                        color: sev.color,
+                        fontSize: sev.size ?? "10px",
+                        fontFamily: "var(--font-body)",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {evt.severity}
+                    </span>
                   </td>
-                  <td className="px-5 py-3 font-mono" style={{ color: "var(--color-text-secondary)" }}>{evt.actor}</td>
+                  <td className="px-5 py-3 font-mono" style={{ color: "var(--color-text-secondary)", fontSize: "var(--fs-xs)" }}>{evt.actor}</td>
                   <td className="px-5 py-3">
                     {evt.resolved ? (
-                      <span className="flex items-center gap-1.5" style={{ color: "var(--color-success)" }}>
-                        <CheckCircle2 size={11} /><span className="text-[10px]">Resolved</span>
+                      // Green check only — text on tooltip
+                      <span title="Resolved" style={{ color: "var(--color-success)", cursor: "default" }}>
+                        <CheckCircle2 size={13} />
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1.5 animate-pulse" style={{ color: "var(--color-danger)" }}>
-                        <AlertTriangle size={11} /><span className="text-[10px]">Active</span>
+                      // Static red dot + "Active" — no blinking
+                      <span className="flex items-center gap-1.5" style={{ color: "var(--color-danger)" }}>
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "var(--color-danger)" }} />
+                        <span style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-body)", fontWeight: 500 }}>Active</span>
                       </span>
                     )}
                   </td>
-                </tr>
+                </motion.tr>
               );
             })}
           </tbody>
         </table>
       </div>
-    </div>
+    </motion.div>
   );
 });
 
+// ── Server Health — horizontal bar chart layout ───────────────────────────────
 const SERVER_NODES = [
   { name: "sentry-eu-01",   region: "Frankfurt",  health: 100, latency: "18ms" },
   { name: "sentry-us-01",   region: "Virginia",   health: 98,  latency: "42ms" },
@@ -514,30 +856,97 @@ const SERVER_NODES = [
 
 const ServerHealthRow = memo(function ServerHealthRow() {
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl px-5 py-3"
-      style={{ background: "var(--color-surface)", border: "1px solid var(--theme-border)" }}>
-      <div className="flex items-center gap-2 mr-2">
-        <Server size={12} style={{ color: "var(--theme-primary)" }} />
-        <span className="text-[10px] font-semibold tracking-widest uppercase" style={{ color: "var(--color-text-secondary)" }}>
-          Infrastructure
-        </span>
-      </div>
-      {SERVER_NODES.map((node) => (
-        <div key={node.name} className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full" style={{
-            background: node.health >= 95 ? "var(--color-success)" : node.health >= 80 ? "var(--color-warning)" : "var(--color-danger)",
-            boxShadow: node.health >= 95 ? "0 0 5px var(--color-success)" : "0 0 5px var(--color-warning)",
-          }} />
-          <span className="text-[10px] font-mono" style={{ color: "var(--color-text-secondary)" }}>{node.name}</span>
-          <span className="text-[10px]" style={{ color: "var(--color-muted)" }}>{node.health}% · {node.latency}</span>
-          <span className="text-[10px]" style={{ color: "rgba(107,114,128,0.4)" }}>{node.region}</span>
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, delay: 0.7 }}
+      className="rounded-xl px-5 py-4"
+      style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)" }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <Server size={12} style={{ color: "var(--theme-primary)" }} />
+          <span style={{ fontSize: "var(--fs-xs)", fontWeight: 600, fontFamily: "var(--font-body)", color: "var(--color-text-secondary)", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            Infrastructure
+          </span>
         </div>
-      ))}
-      <div className="ml-auto flex items-center gap-1.5" style={{ color: "var(--color-muted)" }}>
-        <Radio size={10} className="animate-pulse" />
-        <span className="text-[9px] font-mono tracking-wide">LIVE TELEMETRY</span>
+        <div className="flex items-center gap-1.5" style={{ color: "var(--color-muted)" }}>
+          <motion.div
+            animate={{ scale: [1, 1.5, 1], opacity: [1, 0.4, 1] }}
+            transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <Radio size={10} style={{ color: "var(--theme-primary)" }} />
+          </motion.div>
+          <span style={{ fontSize: "9px", fontFamily: "var(--font-mono)", letterSpacing: "0.06em" }}>LIVE</span>
+        </div>
       </div>
-    </div>
+
+      {/* Horizontal bar chart layout */}
+      <div className="flex flex-col gap-3">
+        {SERVER_NODES.map((node, i) => {
+          const color =
+            node.health >= 95 ? "var(--color-success)"
+            : node.health >= 80 ? "var(--color-warning)"
+            : "var(--color-danger)";
+          const isDegraded = node.health < 80;
+
+          return (
+            <motion.div
+              key={node.name}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.75 + i * 0.06, duration: 0.3 }}
+              className="flex items-center gap-4"
+            >
+              {/* Server name + region inline */}
+              <div style={{ minWidth: "160px" }}>
+                <div className="flex items-center gap-1.5">
+                  {/* Only pulsing dot on degraded server */}
+                  {isDegraded ? (
+                    <motion.span
+                      animate={{ opacity: [1, 0.3, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                      style={{ background: color }}
+                    />
+                  ) : (
+                    <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }} />
+                  )}
+                  <span style={{ fontSize: "var(--fs-xs)", fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)", fontWeight: 500 }}>
+                    {node.name}
+                  </span>
+                  <span style={{ fontSize: "9px", color: "var(--color-muted)", fontFamily: "var(--font-body)" }}>
+                    · {node.region}
+                  </span>
+                </div>
+              </div>
+
+              {/* 4px gradient health bar */}
+              <div
+                className="flex-1 relative rounded-full overflow-hidden"
+                style={{ height: "4px", background: "rgba(255,255,255,0.07)" }}
+              >
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${node.health}%` }}
+                  transition={{ duration: 1.1, delay: 0.8 + i * 0.06, ease: [0.22, 1, 0.36, 1] }}
+                  style={{
+                    background: `linear-gradient(90deg, ${color}, color-mix(in srgb, ${color} 70%, var(--color-success)))`,
+                  }}
+                />
+              </div>
+
+              {/* Health % + latency */}
+              <div className="flex items-center gap-2.5" style={{ minWidth: "80px", justifyContent: "flex-end" }}>
+                <span style={{ fontSize: "var(--fs-xs)", fontWeight: 600, fontFamily: "var(--font-body)", color }}>{node.health}%</span>
+                <span style={{ fontSize: "9px", fontFamily: "var(--font-mono)", color: "var(--color-muted)" }}>{node.latency}</span>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </motion.div>
   );
 });
 
@@ -549,28 +958,74 @@ interface DashboardContentProps {
 const DashboardContent = memo(function DashboardContent({ isConnected, securityState }: DashboardContentProps) {
   return (
     <div className="p-6 space-y-5 min-h-screen">
-      <div className="flex items-center justify-between">
+      <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="flex items-center justify-between"
+      >
         <div>
-          <h1 className="text-lg font-semibold tracking-tight" style={{ color: "var(--color-text)" }}>Operations Desk</h1>
-          <p className="text-xs mt-0.5" style={{ color: "var(--color-muted)" }}>
+          <h1
+            style={{
+              fontSize: "var(--fs-lg)",
+              fontWeight: 700,
+              fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
+              color: "var(--color-text)",
+              letterSpacing: "-0.02em",
+              margin: 0,
+            }}
+          >
+            Operations Desk
+          </h1>
+          <p style={{ fontSize: "var(--fs-xs)", marginTop: "0.2rem", color: "var(--color-muted)", fontFamily: "var(--font-body)" }}>
             <Globe size={9} className="inline mr-1" />
-            SentryOS Enterprise Terminal · Cluster: EU-PROD-07 · Zone: fra1
+            A.R.T.H.U.R. Enterprise Terminal · Cluster: EU-PROD-07 · Zone: fra1
           </p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
-          style={{ background: "var(--color-surface)", border: "1px solid var(--theme-border)", color: "var(--color-text-secondary)" }}>
-          <Activity size={11} style={{ color: "var(--theme-primary)" }} />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.15, duration: 0.35 }}
+          className="hidden sm:flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg"
+          style={{ background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-text-secondary)", fontFamily: "var(--font-body)" }}
+        >
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+          >
+            <Activity size={11} style={{ color: "var(--theme-primary)" }} />
+          </motion.div>
           <span>State: </span>
           <span className="font-semibold" style={{ color: STATE_CONFIG[securityState].color }}>{securityState}</span>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
+
+      {/* Metric cards — staggered, with 3D tilt */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {METRICS.map((m) => <MetricCard key={m.id} {...m} />)}
+        {METRICS.map((m, i) => (
+          <motion.div
+            key={m.id}
+            initial={{ opacity: 0, y: 18, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.45, delay: i * 0.08, ease: [0.25, 0.46, 0.45, 0.94] }}
+          >
+            <MetricCard {...m} index={i} />
+          </motion.div>
+        ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4" style={{ minHeight: "300px" }}>
+
+      {/* Terminal + Code panels */}
+      <motion.div
+        initial={{ opacity: 0, y: 14 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.3 }}
+        className="grid grid-cols-1 lg:grid-cols-5 gap-4"
+        style={{ minHeight: "300px" }}
+      >
         <div className="lg:col-span-3"><TerminalPanel isConnected={isConnected} /></div>
         <div className="lg:col-span-2"><CodePanel /></div>
-      </div>
+      </motion.div>
+
       <SecurityEventsTable />
       <ServerHealthRow />
       <div className="h-4" />
@@ -582,14 +1037,10 @@ const DashboardContent = memo(function DashboardContent({ isConnected, securityS
 // Dashboard Inner — rendered inside PresentationModeProvider
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ⚡ Bolt: Wrapped static/heavy components in React.memo() to prevent
-// unnecessary re-renders when the 10Hz WebSocket pushes new timestamp data.
 function DashboardInner() {
-  // Presentation override (null = sensors in control)
   const { overrideState, isOverrideActive } = usePresentationMode();
   const router = useRouter();
 
-  // Live sensor pipeline
   const {
     securityState, faceCount, dominantColor, isConnected,
     isDisconnected, isSupported, deviceName, rssi, distance,
@@ -597,10 +1048,8 @@ function DashboardInner() {
     scan, pair, unpair, requestPairing,
   } = useSecurityState();
 
-  // Override wins when set by presenter keyboard shortcut; sensors resume on Ctrl+Shift+0
   const finalSecurityState = overrideState ?? securityState;
 
-  // BLE auto-logout watchdog (8 s grace period after disconnect)
   const bleConnected = !isDisconnected;
   const handleLogout = useCallback(() => {
     fetch("http://localhost:8000/bluetooth/unpair", { method: "POST" }).catch(() => {});
@@ -611,8 +1060,10 @@ function DashboardInner() {
 
   return (
     <ChameleonWrapper dominantColor={dominantColor}>
-      <div className="relative min-h-screen" style={{ background: "var(--chameleon-bg, var(--color-bg))", transition: "background-color 0.8s ease-in-out" }}>
-
+      <div
+        className="relative min-h-screen"
+        style={{ background: "var(--chameleon-bg, var(--color-bg))", transition: "background-color 0.8s ease-in-out" }}
+      >
         {/* ── Always-visible security header (z-40, outside blur zone) ── */}
         <SecurityTopBar
           securityState={finalSecurityState}
@@ -628,13 +1079,13 @@ function DashboardInner() {
         {/* ── Presentation Mode indicator strip ── */}
         {isOverrideActive && (
           <div
-            className="fixed top-14 left-0 right-0 z-40 flex items-center justify-center py-1"
+            className="fixed top-12 left-0 right-0 z-40 flex items-center justify-center py-1"
             style={{
               background: "rgba(234,179,8,0.07)",
               borderBottom: "1px solid rgba(234,179,8,0.22)",
               color: "rgba(234,179,8,0.65)",
               fontSize: "9px",
-              fontFamily: "monospace",
+              fontFamily: "var(--font-mono)",
               letterSpacing: "0.12em",
             }}
           >
@@ -642,14 +1093,14 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* ── Protected content canvas (shifts down when override strip is visible) ── */}
-        <div className={isOverrideActive ? "pt-[3.25rem]" : "pt-14"}>
+        {/* ── Protected content canvas ── */}
+        <div className={isOverrideActive ? "pt-[3.25rem]" : "pt-12"}>
           <GlassOverlay securityState={finalSecurityState}>
             <DashboardContent isConnected={isConnected} securityState={finalSecurityState} />
           </GlassOverlay>
         </div>
 
-        {/* ── Lock screen (z-50, outside blur zone, auto-heals on BLE return) ── */}
+        {/* ── Lock screen (z-50, outside blur zone) ── */}
         <AnimatePresence>
           {finalSecurityState === "LOCKED" && (
             <LockScreen
@@ -669,7 +1120,6 @@ function DashboardInner() {
             />
           )}
         </AnimatePresence>
-
       </div>
     </ChameleonWrapper>
   );
@@ -680,8 +1130,6 @@ function DashboardInner() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  // Redirect to / immediately if sessionStorage sentinel is absent.
-  // Must be the first hook call — fires before any render output.
   useAuthGuard();
 
   return (

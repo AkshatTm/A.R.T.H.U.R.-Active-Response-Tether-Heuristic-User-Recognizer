@@ -1,5 +1,5 @@
 """
-SentryOS — BLE Configuration Persistence
+A.R.T.H.U.R. — BLE Configuration Persistence
 ==========================================
 
 Manages saving/loading the paired Bluetooth device configuration to a
@@ -41,7 +41,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
-logger = logging.getLogger("sentryos.ble_config")
+logger = logging.getLogger("arthur.ble_config")
 
 # Config file lives next to main.py
 _CONFIG_DIR = Path(__file__).resolve().parent

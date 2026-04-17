@@ -1,7 +1,7 @@
 /**
  * useSecuritySocket
  * -----------------
- * Connects to the SentryOS Python backend via WebSocket and consumes the
+ * Connects to the A.R.T.H.U.R. Python backend via WebSocket and consumes the
  * ADR-01 flat JSON sensor payload at 10 Hz.
  *
  * Features:

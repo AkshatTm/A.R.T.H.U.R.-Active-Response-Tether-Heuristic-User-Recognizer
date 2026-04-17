@@ -1,5 +1,5 @@
 """
-SentryOS — Vision Tracker (MediaPipe Face Detection — Task API)
+A.R.T.H.U.R. — Vision Tracker (MediaPipe Face Detection — Task API)
 ================================================================
 
 Encapsulates Google MediaPipe's **Face Detection** Task API for real-time
@@ -59,7 +59,7 @@ import numpy as np
 
 # ── Module Logger ───────────────────────────────────────────────────────────
 
-logger = logging.getLogger("sentryos.vision_tracker")
+logger = logging.getLogger("arthur.vision_tracker")
 
 # ── Detection Result ────────────────────────────────────────────────────────
 

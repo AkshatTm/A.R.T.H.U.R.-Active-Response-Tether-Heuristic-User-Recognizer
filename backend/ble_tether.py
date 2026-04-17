@@ -1,5 +1,5 @@
 """
-SentryOS — Bluetooth Proximity Tether Service (Dual-Mode)
+A.R.T.H.U.R. — Bluetooth Proximity Tether Service (Dual-Mode)
 ==========================================================
 
 Manages Bluetooth scanning, pairing, and proximity monitoring using
@@ -82,7 +82,7 @@ except ImportError:
     _wbt = None  # type: ignore[assignment]
     HAS_WINRT_BT = False
 
-logger = logging.getLogger("sentryos.ble_tether")
+logger = logging.getLogger("arthur.ble_tether")
 
 # ── Constants ───────────────────────────────────────────────────────────────
 

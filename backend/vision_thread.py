@@ -1,5 +1,5 @@
 """
-SentryOS — Vision Thread Orchestrator
+A.R.T.H.U.R. — Vision Thread Orchestrator
 ======================================
 
 Owns the camera hardware, runs the main frame-processing loop on a
@@ -60,7 +60,7 @@ from color_extractor import (
 
 # ── Module Logger ───────────────────────────────────────────────────────────
 
-logger = logging.getLogger("sentryos.vision_thread")
+logger = logging.getLogger("arthur.vision_thread")
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ CAMERA_RETRY_DELAYS: list[float] = [1.0, 2.0, 4.0, 8.0, 10.0]
 attempts.  Caps at 10 s to avoid unresponsive startup when the camera
 is locked by another application (Zoom, Teams, etc.)."""
 
-DEBUG_WINDOW_NAME: str = "SentryOS Debug — Vision Pipeline"
+DEBUG_WINDOW_NAME: str = "A.R.T.H.U.R. Debug — Vision Pipeline"
 """Title of the ``cv2.imshow`` window shown in debug mode."""
 
 # ── Colour Constants for Debug Overlay ──────────────────────────────────────
@@ -168,7 +168,7 @@ class VisionLoop:
         self._stop_event.clear()
         self._thread = threading.Thread(
             target=self._run,
-            name="SentryOS-VisionThread",
+            name="ARTHUR-VisionThread",
             daemon=True,
         )
         self._thread.start()

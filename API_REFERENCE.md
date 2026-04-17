@@ -2,7 +2,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | SentryOS |
+| **Product** | A.R.T.H.U.R. |
 | **Version** | 1.0.0 |
 | **Base URL** | `http://localhost:8000` |
 | **WebSocket** | `ws://localhost:8000/ws` |
@@ -28,7 +28,7 @@ Host: localhost:8000
 ```json
 {
   "status": "ok",
-  "service": "SentryOS",
+  "service": "A.R.T.H.U.R.",
   "engine": {
     "face_count": 1,
     "dominant_color": "#4A90E2",
@@ -45,7 +45,7 @@ Host: localhost:8000
 | Field | Type | Description |
 |-------|------|-------------|
 | `status` | `string` | Always `"ok"` if the server is responding |
-| `service` | `string` | Service identifier (`"SentryOS"`) |
+| `service` | `string` | Service identifier (`"A.R.T.H.U.R."`) |
 | `engine` | `object` | Latest `ThreadSafeState` snapshot (see §2.3) |
 | `vision_thread_alive` | `boolean` | `true` if the daemon vision thread is running |
 | `uptime_seconds` | `float` | Seconds since server start |
@@ -101,7 +101,7 @@ Sent once immediately after connection acceptance. Allows the client to verify p
 ```json
 {
   "event": "connected",
-  "message": "SentryOS WebSocket ready",
+  "message": "A.R.T.H.U.R. WebSocket ready",
   "version": "1.0.0"
 }
 ```

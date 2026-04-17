@@ -1,5 +1,5 @@
 """
-SentryOS — Dominant Colour Extractor (K-Means Clustering)
+A.R.T.H.U.R. — Dominant Colour Extractor (K-Means Clustering)
 =========================================================
 
 Pure-function module that accepts a raw BGR frame (numpy array) from the
@@ -40,7 +40,7 @@ from sklearn.cluster import MiniBatchKMeans
 
 # ── Module Logger ───────────────────────────────────────────────────────────
 
-logger = logging.getLogger("sentryos.color_extractor")
+logger = logging.getLogger("arthur.color_extractor")
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -59,7 +59,7 @@ and convergence fast on the small 10 000-sample input."""
 
 DEFAULT_COLOR: str = "#1a1a2e"
 """Fallback HEX colour returned when extraction fails (e.g. the frame is
-too small to crop a valid ROI).  Matches the SentryOS dark theme base."""
+too small to crop a valid ROI).  Matches the A.R.T.H.U.R. dark theme base."""
 
 # ── Predefined Colour Palette ───────────────────────────────────────────────
 #

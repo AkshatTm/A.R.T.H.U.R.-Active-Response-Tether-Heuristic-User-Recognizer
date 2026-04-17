@@ -1,24 +1,18 @@
 /**
  * LockScreen — Informational Full-Screen Lock Overlay
  *
- * Rendered via <AnimatePresence> in the dashboard parent. This component is
- * mounted when securityState === "LOCKED" and unmounted when it transitions
- * back to "BLURRED" or "SECURE".
+ * Redesigned per UI Enhancement Master Plan §6.9:
+ * - Darker backdrop: rgba(5,5,10,0.96) — feels impenetrable
+ * - Single dashed ring (15s rotation) — removed 3 nested rings (too busy)
+ * - Removed: red scan sweep line (implies scanning, wrong semantics)
+ * - Removed: HUD corner marks (overused across the app)
+ * - "Session Locked": Satoshi Bold, 28px, color-danger
+ * - "Hardware Tether Lost": Space Grotesk 16px, color-text-secondary
+ * - Grace period: full-width draining progress bar (not the blinking box)
+ * - ADR-02 footnote: removed from lock screen
+ * - RSSI meter: moved outside card, pinned to bottom viewport
  *
- * Lifecycle (Option A — Auto-Heal):
- *   LOCKED → display this screen with reconnection instructions
- *   BLE device returns to range → useProximityTether.isDisconnected → false
- *   useSecurityState derives "SECURE" or "BLURRED" → parent unmounts this component
- *   AnimatePresence plays the exit animation, then removes it from the DOM
- *
- * No manual PIN required. The Bluetooth tether is the authentication factor.
- *
- * Visual Design:
- *   - Full-screen dark overlay with a frosted glass center card
- *   - Lock icon pulses gently to indicate an active (not crashed) state
- *   - RSSI meter shows signal proximity in real time
- *   - Enter animation: fade + scale up from 0.94
- *   - Exit animation: fade + scale down to 0.96 (slightly different — feels deliberate)
+ * No manual PIN required — the Bluetooth tether is the authentication factor.
  */
 
 "use client";
@@ -40,7 +34,10 @@ const cardVariants = {
     opacity: 1,
     scale: 1,
     y: 0,
-    transition: { duration: 0.45, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] },
+    transition: {
+      duration: 0.45,
+      ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
+    },
   },
   exit: {
     opacity: 0,
@@ -50,52 +47,26 @@ const cardVariants = {
   },
 };
 
-const lockIconPulse = {
-  animate: {
-    scale: [1, 1.06, 1],
-    opacity: [0.9, 1, 0.9],
-  },
-};
-
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface LockScreenProps {
-  /** Paired device name, or null if unknown. */
   deviceName: string | null;
-  /** Last RSSI reading in dBm. Null if no advertising packet received. */
   rssi: number | null;
-  /** Estimated distance from paired device in metres. Null if unavailable. */
   distance: number | null;
-  /** Always true when using backend BLE. */
   isSupported: boolean;
-  /** Whether the BLE device is currently disconnected / out of range. */
   isDisconnected: boolean;
-  /** Always false when using backend BLE. */
   isGattOnly: boolean;
-  /** True while a scan or pair operation is in progress. */
   isPairing: boolean;
-  /** Devices found during the last scan. */
   availableDevices: { name: string; address: string; rssi: number; type?: string }[];
-  /** Trigger a BLE scan via backend. */
   scan: () => Promise<void>;
-  /** Pair with a device by MAC address. */
   pair: (mac: string, name?: string, deviceType?: string) => Promise<void>;
-  /**
-   * Legacy compatibility — triggers scan().
-   */
   requestPairing: (namePrefix?: string) => Promise<void>;
-  /** True while the 8-second auto-logout countdown is running. */
   isGracePeriod?: boolean;
-  /** Seconds remaining in the grace period countdown. */
   remainingSeconds?: number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/**
- * Maps RSSI dBm to a human-readable proximity label.
- * The useProximityTether threshold is –70 dBm (approx. 2 m).
- */
 function rssiToProximityLabel(rssi: number, distance: number | null): string {
   if (distance !== null) {
     if (distance < 0.5) return `Very Close (${distance.toFixed(1)} m)`;
@@ -103,7 +74,6 @@ function rssiToProximityLabel(rssi: number, distance: number | null): string {
     if (distance < 2.5) return `Borderline (${distance.toFixed(1)} m)`;
     return `Out of Range (${distance.toFixed(1)} m)`;
   }
-  // Fallback to RSSI-only labels if distance unavailable
   if (rssi >= -55) return "Very Close (< 0.5 m)";
   if (rssi >= -65) return "Near (< 1.5 m)";
   if (rssi >= -75) return "Borderline (~2 m)";
@@ -112,7 +82,6 @@ function rssiToProximityLabel(rssi: number, distance: number | null): string {
 
 /** Renders 5 signal bars based on RSSI strength. */
 function SignalBars({ rssi }: { rssi: number | null }) {
-  // Map RSSI to 0–5 bars. Threshold for each bar: -55, -65, -70, -75, -85
   const thresholds = [-55, -65, -70, -75, -85];
   const activeBars = rssi === null
     ? 0
@@ -132,6 +101,79 @@ function SignalBars({ rssi }: { rssi: number | null }) {
         />
       ))}
     </div>
+  );
+}
+
+// ── RSSI Floating Strip (outside card, bottom of viewport) ────────────────────
+
+function RssiStrip({
+  deviceName,
+  rssi,
+  distance,
+  isGattOnly,
+  isDisconnected,
+}: {
+  deviceName: string | null;
+  rssi: number | null;
+  distance: number | null;
+  isGattOnly: boolean;
+  isDisconnected: boolean;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 20 }}
+      transition={{ delay: 0.4, duration: 0.35 }}
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "1rem",
+        padding: "0.625rem 1.25rem",
+        borderRadius: "12px",
+        background: "rgba(13, 13, 19, 0.85)",
+        border: "1px solid var(--color-border)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
+        minWidth: "280px",
+      }}
+    >
+      {isGattOnly && !isDisconnected ? (
+        <Bluetooth size={14} style={{ color: "var(--color-warning)", flexShrink: 0 }} />
+      ) : rssi !== null ? (
+        <Signal size={14} style={{ color: "var(--color-danger)", flexShrink: 0 }} />
+      ) : (
+        <BluetoothOff size={14} style={{ color: "var(--color-danger)", flexShrink: 0 }} />
+      )}
+      <span
+        style={{
+          fontSize: "var(--fs-xs)",
+          fontFamily: "var(--font-body)",
+          color: "var(--color-text-secondary)",
+          fontWeight: 500,
+        }}
+      >
+        {deviceName ?? "Unknown Device"}
+      </span>
+      <div style={{ flexGrow: 1, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "0.75rem" }}>
+        <SignalBars rssi={rssi} />
+        <span
+          style={{
+            fontSize: "var(--fs-xs)",
+            fontFamily: "var(--font-mono)",
+            color: "var(--color-muted)",
+          }}
+        >
+          {isGattOnly && !isDisconnected
+            ? "Connected (no proximity data)"
+            : rssi !== null
+              ? `${rssi} dBm · ${rssiToProximityLabel(rssi, distance)}`
+              : "No signal"}
+        </span>
+      </div>
+    </motion.div>
   );
 }
 
@@ -162,9 +204,10 @@ export function LockScreen({
       transition={{ duration: 0.3, ease: "easeOut" }}
       className="fixed inset-0 z-50 flex items-center justify-center"
       style={{
-        backgroundColor: "rgba(10, 10, 18, 0.88)",
-        backdropFilter: "blur(6px)",
-        WebkitBackdropFilter: "blur(6px)",
+        // Darker — this is a security screen, should feel impenetrable
+        backgroundColor: "rgba(5, 5, 10, 0.96)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
       }}
     >
       {/* ── Center card ── */}
@@ -176,143 +219,159 @@ export function LockScreen({
         exit="exit"
         className="relative flex flex-col items-center gap-6 rounded-2xl p-10 max-w-md w-full mx-4 text-center"
         style={{
-          background:
-            "linear-gradient(145deg, rgba(26,26,46,0.95), rgba(22,33,62,0.9))",
-          border: "1px solid var(--theme-border)",
+          background: "linear-gradient(145deg, rgba(19,19,26,0.97), rgba(25,19,38,0.95))",
+          border: "1px solid rgba(244,63,94,0.2)",
           boxShadow:
-            "0 0 0 1px rgba(239,68,68,0.15), 0 24px 64px rgba(0,0,0,0.7), 0 0 40px rgba(239,68,68,0.08)",
+            "0 0 0 1px rgba(244,63,94,0.1), 0 24px 64px rgba(0,0,0,0.8), 0 0 60px rgba(244,63,94,0.06)",
         }}
       >
-        {/* ── Danger glow ring behind icon ── */}
+        {/* Danger glow from top */}
         <div
-          className="absolute inset-0 rounded-2xl opacity-20 pointer-events-none"
+          className="absolute inset-0 rounded-2xl opacity-25 pointer-events-none"
           style={{
-            background:
-              "radial-gradient(ellipse at 50% 0%, rgba(239,68,68,0.4) 0%, transparent 65%)",
+            background: "radial-gradient(ellipse at 50% 0%, rgba(244,63,94,0.3) 0%, transparent 60%)",
           }}
         />
 
-        {/* ── Lock icon (pulsing) ── */}
-        <motion.div
-          variants={lockIconPulse}
-          animate="animate"
-          transition={{ repeat: Infinity, duration: 2.4, ease: "easeInOut" }}
-          className="relative z-10 flex items-center justify-center w-20 h-20 rounded-full"
-          style={{
-            background: "rgba(239,68,68,0.12)",
-            border: "1px solid rgba(239,68,68,0.3)",
-            boxShadow: "0 0 24px rgba(239,68,68,0.2)",
-          }}
-        >
-          <LockKeyhole size={36} className="text-danger" strokeWidth={1.5} />
-        </motion.div>
+        {/* ── Lock icon with SINGLE dashed ring — simplified ── */}
+        <div className="relative z-10 flex items-center justify-center w-20 h-20">
+          {/* Single slow-rotating dashed ring */}
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+            className="absolute inset-0 rounded-full"
+            style={{
+              border: "1.5px dashed rgba(244,63,94,0.35)",
+            }}
+          />
+          {/* Subtle radial pulse */}
+          <motion.div
+            animate={{ opacity: [0.3, 0.6, 0.3], scale: [0.95, 1.05, 0.95] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute"
+            style={{
+              inset: "14px",
+              borderRadius: "50%",
+              background: "radial-gradient(circle at 50% 50%, rgba(244,63,94,0.2) 0%, transparent 70%)",
+            }}
+          />
+          {/* Lock icon — larger, no background circle needed */}
+          <motion.div
+            animate={{ scale: [1, 1.04, 1], opacity: [0.9, 1, 0.9] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+            className="relative flex items-center justify-center"
+          >
+            <LockKeyhole size={36} className="text-danger" strokeWidth={1.5} />
+          </motion.div>
+        </div>
 
         {/* ── Status label ── */}
-        <div className="relative z-10 flex flex-col gap-1.5">
+        <div className="relative z-10 flex flex-col gap-2">
+          {/* Satoshi Bold, 28px — assertive but not screaming */}
           <span
-            className="text-[10px] font-semibold tracking-[0.2em] uppercase"
-            style={{ color: "var(--color-danger)" }}
+            style={{
+              fontSize: "1.75rem",
+              fontWeight: 700,
+              fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
+              color: "var(--color-danger)",
+              letterSpacing: "-0.025em",
+              lineHeight: 1.1,
+            }}
           >
             Session Locked
           </span>
-          <h2 className="text-2xl font-semibold text-[var(--color-text)]">
-            Hardware Tether Lost
+          {/* Space Grotesk — description, not headline */}
+          <h2
+            style={{
+              fontSize: "1rem",
+              fontWeight: 400,
+              fontFamily: "var(--font-body)",
+              color: "var(--color-text-secondary)",
+              margin: 0,
+            }}
+          >
+            Hardware tether lost
           </h2>
 
           {isGracePeriod ? (
-            <div className="flex flex-col items-center gap-2 mt-1">
+            <div className="flex flex-col items-center gap-3 mt-2">
               <p
-                className="text-sm leading-relaxed"
-                style={{ color: "var(--color-text-secondary)" }}
+                style={{
+                  fontSize: "var(--fs-sm)",
+                  fontFamily: "var(--font-body)",
+                  color: "var(--color-text-secondary)",
+                  lineHeight: 1.6,
+                }}
               >
                 Bring your paired device back within range.
               </p>
-              <motion.div
-                key={remainingSeconds}
-                initial={{ scale: 1.15, opacity: 0.7 }}
-                animate={{ scale: 1, opacity: 1 }}
-                transition={{ duration: 0.3 }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl mt-1"
+              {/* Full-width draining progress bar */}
+              <div
                 style={{
-                  background: "rgba(239,68,68,0.14)",
-                  border: "1px solid rgba(239,68,68,0.4)",
-                  boxShadow: "0 0 16px rgba(239,68,68,0.2)",
+                  width: "100%",
+                  height: "4px",
+                  borderRadius: "2px",
+                  background: "rgba(244,63,94,0.15)",
+                  overflow: "hidden",
+                  position: "relative",
                 }}
               >
-                <motion.span
-                  animate={{ opacity: [1, 0.4, 1] }}
-                  transition={{ duration: 1, repeat: Infinity, ease: "easeInOut" }}
-                  className="w-2 h-2 rounded-full"
-                  style={{ background: "var(--color-danger)", flexShrink: 0 }}
+                <motion.div
+                  key={`bar-${remainingSeconds}`}
+                  initial={{ width: "100%" }}
+                  animate={{ width: `${(remainingSeconds / 8) * 100}%` }}
+                  transition={{ duration: 1, ease: "linear" }}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    bottom: 0,
+                    background: "linear-gradient(90deg, var(--color-danger), color-mix(in srgb, var(--color-danger) 60%, var(--color-warning)))",
+                    borderRadius: "2px",
+                  }}
                 />
-                <span
-                  className="text-sm font-bold font-mono"
-                  style={{ color: "var(--color-danger)" }}
-                >
-                  Reconnect within {remainingSeconds}s or this session will end
-                </span>
-              </motion.div>
+              </div>
+              <span
+                style={{
+                  fontSize: "var(--fs-sm)",
+                  fontFamily: "var(--font-body)",
+                  color: "var(--color-danger)",
+                  fontWeight: 500,
+                }}
+              >
+                {remainingSeconds}s to reconnect before session ends
+              </span>
             </div>
           ) : (
             <p
-              className="text-sm leading-relaxed mt-1"
-              style={{ color: "var(--color-text-secondary)" }}
+              style={{
+                fontSize: "var(--fs-sm)",
+                fontFamily: "var(--font-body)",
+                color: "var(--color-text-secondary)",
+                lineHeight: 1.7,
+                marginTop: "0.25rem",
+              }}
             >
               Your paired Bluetooth device has moved out of range.
               <br />
-              Bring your paired device back within range — this session will{" "}
-              <span className="text-[var(--color-text)] font-medium">
+              This session will{" "}
+              <span style={{ color: "var(--color-text)", fontWeight: 500 }}>
                 automatically restore
               </span>{" "}
               when the device returns.
             </p>
           )}
         </div>
-
-        {/* ── RSSI signal meter ── */}
-        <div
-          className="relative z-10 w-full flex items-center justify-between rounded-xl px-4 py-3"
-          style={{
-            background: "rgba(255,255,255,0.04)",
-            border: "1px solid rgba(255,255,255,0.06)",
-          }}
-        >
-          <div className="flex items-center gap-2.5">
-            {isGattOnly && !isDisconnected ? (
-              <Bluetooth size={15} style={{ color: "var(--color-warning)" }} />
-            ) : rssi !== null ? (
-              <Signal size={15} style={{ color: "var(--color-danger)" }} />
-            ) : (
-              <BluetoothOff size={15} style={{ color: "var(--color-danger)" }} />
-            )}
-            <span
-              className="text-xs font-medium"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              {deviceName ?? "Unknown Device"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <SignalBars rssi={rssi} />
-            <span className="text-xs font-mono" style={{ color: "var(--color-muted)" }}>
-              {isGattOnly && !isDisconnected
-                ? "Connected (no proximity data)"
-                : rssi !== null
-                  ? `${rssi} dBm · ${rssiToProximityLabel(rssi, distance)}`
-                  : "No signal"}
-            </span>
-          </div>
-        </div>
-
-        {/* ── ADR-02 footnote ── */}
-        <p
-          className="relative z-10 text-[10px] tracking-wide"
-          style={{ color: "var(--color-muted)" }}
-        >
-          ADR-02 · FAIL-CLOSED · Zero-Trust Physical Tether
-        </p>
       </motion.div>
+
+      {/* ── RSSI strip — outside card, pinned to bottom of viewport ── */}
+      <RssiStrip
+        deviceName={deviceName}
+        rssi={rssi}
+        distance={distance}
+        isGattOnly={isGattOnly}
+        isDisconnected={isDisconnected}
+      />
     </motion.div>
   );
 }
