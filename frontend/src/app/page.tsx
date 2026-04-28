@@ -413,6 +413,7 @@ export default function LoginPage() {
             <MagneticButton
               type="submit"
               disabled={isLoading}
+              aria-busy={isLoading}
               style={{
                 marginTop: "0.25rem",
                 width: "100%",
