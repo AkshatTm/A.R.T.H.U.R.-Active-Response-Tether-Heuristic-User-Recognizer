@@ -4,7 +4,7 @@
 |-------|-------|
 | **Product** | A.R.T.H.U.R. |
 | **Platforms** | Windows 10+, macOS 12+, Ubuntu 20.04+ |
-| **Last Updated** | 2026-03-02 |
+| **Last Updated** | 2026-04-17 |
 
 ---
 
@@ -62,7 +62,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Expected output:** All packages install without errors. `mediapipe` and `opencv-python` may take a moment to download (~100 MB total).
+**Expected output:** All packages install without errors. `mediapipe` and `opencv-python` may take a moment to download (~100 MB total). `bleak` installs the cross-platform BLE library.
 
 ### 2.3 Frontend Setup
 
@@ -91,6 +91,13 @@ cd backend
 python main.py
 ```
 
+**Alternative (Windows PowerShell):** Use the launcher script to avoid stderr NativeCommandError:
+
+```powershell
+cd backend
+.\start_backend.ps1
+```
+
 **Expected console output:**
 
 ```
@@ -98,6 +105,7 @@ HH:MM:SS  INFO      arthur.main  ===============================================
 HH:MM:SS  INFO      arthur.main    A.R.T.H.U.R. AI Sensory Engine — Starting Up
 HH:MM:SS  INFO      arthur.main  ============================================================
 HH:MM:SS  INFO      arthur.main  Vision thread launched
+HH:MM:SS  INFO      arthur.main  BLE tether service initialised
 INFO:     Uvicorn running on http://0.0.0.0:8000
 HH:MM:SS  INFO      arthur.vision  Camera 0 opened successfully
 ```
@@ -133,13 +141,15 @@ Open `http://localhost:3000` in Google Chrome.
 ### 3.3 Quick Verification Checklist
 
 | # | Check | Expected Result |
-|---|-------|-----------------|
-| 1 | Navigate to `http://localhost:3000` | Glassmorphism login page with pre-filled email |
-| 2 | Enter any password and submit | 800ms animation → "ACCESS GRANTED" → redirect to `/dashboard` |
-| 3 | Dashboard loads | TopBar visible with WS and BLE status chips |
-| 4 | WebSocket chip (TopBar) | Green, showing live face count |
-| 5 | Look at webcam | Face count = `1` |
-| 6 | Hold colored object to camera center | Background glow shifts color within ~2s |
+|---|-------|----|
+| 1 | Navigate to `http://localhost:3000` | GradientMesh animated login page with glassmorphism card |
+| 2 | Enter any password and submit | 800ms animation → "ACCESS GRANTED" → redirect to `/setup` |
+| 3 | `/setup` page loads | BLE setup wizard with backend-driven device scanning |
+| 4 | Scan and pair a BLE device (or click "Skip" if bypassed) | Device paired → redirect to `/dashboard` |
+| 5 | Dashboard loads | TopBar visible with "S" lettermark and status dots |
+| 6 | WebSocket dot (TopBar) | Green dot in status cluster |
+| 7 | Look at webcam | Face count reflected in Eye dot (green = 1 face) |
+| 8 | Hold colored object to camera center | Background glow shifts color within ~2s |
 
 ---
 
@@ -182,41 +192,47 @@ npm run dev
 NEXT_PUBLIC_BLE_BYPASS=true npm run dev
 ```
 
-When bypassed, the Bluetooth tether is disabled and the UI security state depends only on the camera sensor. The initial state will be BLURRED instead of LOCKED.
+When bypassed, the Bluetooth tether is disabled and the UI security state depends only on the camera sensor. The initial state will be BLURRED instead of LOCKED. The `/setup` page can be skipped.
 
 ---
 
-## 5. Web Bluetooth Setup
+## 5. Bluetooth Setup
 
 > **This section is only required if you want to use the Bluetooth proximity tether feature.** If you don't have BLE hardware, use the `NEXT_PUBLIC_BLE_BYPASS=true` environment variable instead.
 
-### 5.1 Enable Experimental Web Platform Features
+### 5.1 Backend-Driven BLE (Default)
 
-Some Chrome builds require an experimental flag for the `watchAdvertisements()` API:
+As of v2.0.0, BLE is handled entirely by the Python backend using the **Bleak** library. No browser extensions or Chrome flags are required for BLE functionality.
 
-1. Open Chrome and navigate to: `chrome://flags/#enable-experimental-web-platform-features`
-2. Set the flag to **Enabled**
-3. Click **Relaunch**
+**How it works:**
+1. Navigate to `/setup` after logging in
+2. Click **Scan for devices** — the backend scans using Bleak
+3. Available BLE and classic Bluetooth devices are listed
+4. Select your device — the backend saves the config to `ble_config.json`
+5. On subsequent backend restarts, the device auto-connects — no user action needed
 
-### 5.2 Verify Bluetooth API
+### 5.2 Supported Device Types
 
-Open Chrome DevTools (F12) → Console:
+| Type | Examples | How It Works |
+|------|----------|-------------|
+| **Classic Bluetooth** | Earbuds, headphones, speakers | Backend lists OS-paired devices; monitors via periodic scanning |
+| **BLE (Low Energy)** | Fitness bands, BLE beacons | Backend uses Bleak scanner to discover and monitor RSSI |
 
-```javascript
-navigator.bluetooth
-// Should return: Bluetooth {}
-// If undefined: flag not enabled or browser unsupported
+### 5.3 BLE Config Persistence
+
+Paired device info is saved to `backend/ble_config.json`:
+
+```json
+{
+  "mac": "90:A0:BE:8A:24:66",
+  "name": "Nirvana Crystl",
+  "tx_power": -59,
+  "path_loss_n": 2.0,
+  "device_type": "classic"
+}
 ```
 
-### 5.3 Pairing a Device
-
-1. Navigate to the Dashboard (`/dashboard`) or the Setup page (`/setup`)
-2. Click the **Pair** button in the TopBar or setup page
-3. Chrome will display the native Bluetooth pairing dialog
-4. Select your BLE device (smartwatch, earbuds, etc.)
-5. The device name and RSSI will appear in the TopBar
-
-> **Note:** `requestPairing()` must be triggered by a user gesture (click). This is a Web Bluetooth specification requirement — it cannot be auto-triggered on page load.
+To unpair: send `POST /bluetooth/unpair` or delete `ble_config.json` and restart the backend.
 
 ### 5.4 RSSI Behavior
 
@@ -245,6 +261,10 @@ The backend accepts cross-origin requests from `http://localhost:3000` only. If 
 
 The frontend connects to `ws://localhost:8000/ws`. This URL is hardcoded in `useSecuritySocket.ts`. For deployment to a different host, update the `WS_URL` constant.
 
+### 6.4 BLE REST API
+
+The frontend calls BLE endpoints at `http://localhost:8000/bluetooth/*`. This base URL is defined as `API_BASE` in `useProximityTether.ts` and `setup/page.tsx`.
+
 ---
 
 ## 7. Troubleshooting
@@ -257,16 +277,20 @@ The frontend connects to `ws://localhost:8000/ws`. This URL is hardcoded in `use
 | **MediaPipe import error** | `ImportError: mediapipe` | Verify Python 3.10+. Reinstall: `pip install mediapipe --force-reinstall` |
 | **Port 8000 in use** | `Address already in use` | Kill the process: `netstat -ano \| findstr :8000` → `taskkill /PID <pid> /F` (Windows) |
 | **Module not found** | `ModuleNotFoundError` | Ensure virtual environment is activated. Run `pip install -r requirements.txt` |
+| **BLE scan returns empty** | No devices found | Ensure Bluetooth adapter is enabled. On Windows, check Bluetooth settings are on |
+| **Bleak import error** | `ImportError: bleak` | Install: `pip install bleak>=0.21.0` |
+| **PowerShell stderr error** | NativeCommandError from uvicorn | Use `.\start_backend.ps1` launcher script instead of `python main.py` |
 
 ### 7.2 Frontend Issues
 
 | Problem | Symptom | Solution |
 |---------|---------|----------|
-| **WebSocket won't connect** | Grey WS chip in TopBar | Ensure backend is running on port 8000. Check browser console for errors |
-| **BLE not available** | `navigator.bluetooth is undefined` | Enable Chrome experimental flag (§5.1). Use HTTPS in production (localhost is exempt) |
+| **WebSocket won't connect** | Muted WS dot in TopBar status cluster | Ensure backend is running on port 8000. Check browser console for errors |
 | **Login loop** | Redirects back to `/` after login | Clear sessionStorage: DevTools → Application → Session Storage → Clear. Or: `sessionStorage.setItem('sentry_auth','1')` in console |
-| **Type errors on build** | `tsc` errors | Run `npm install` to ensure `@types/web-bluetooth` is installed |
+| **Setup loop** | Redirects to `/setup` after pairing | Set `sessionStorage.setItem('sentry_ble_paired','1')` in console |
+| **Type errors on build** | `tsc` errors | Run `npm install` to ensure all type definitions are installed |
 | **Port 3000 in use** | `EADDRINUSE` | Kill the process or use `npm run dev -- -p 3001` |
+| **Fonts not loading** | Satoshi not rendering | Check internet connection (Fontshare CDN). Space Grotesk and IBM Plex Mono load via Next.js `next/font` |
 
 ### 7.3 Integration Issues
 
@@ -275,6 +299,8 @@ The frontend connects to `ws://localhost:8000/ws`. This URL is hardcoded in `use
 | **CORS errors** | Console shows blocked cross-origin request | Backend must be on `localhost:8000`, frontend on `localhost:3000` |
 | **Stale face count** | Face count stuck at old value | Backend vision thread may have crashed. Restart: `python main.py` |
 | **Chameleon not updating** | Color doesn't change | Ensure colored object is in center of frame (100×100px ROI). Check `dominant_color` in health endpoint |
+| **BLE shows disconnected** | Red BLE dot despite device nearby | Check `GET /bluetooth/status` for backend BLE state. May need to re-pair |
+| **Auto-logout fires** | Logged out after 8 seconds | BLE device lost signal briefly. Ensure device stays within ~2m range |
 
 ---
 
@@ -313,13 +339,13 @@ npm run lint
 
 ### 8.4 Application Routes
 
-The application has the following routes:
+The application has the following routes with a linear auth flow:
 
-| Route | Purpose |
-|-------|---------|
-| `/` | Login page (glassmorphism, session auth) |
-| `/setup` | BLE device pairing wizard |
-| `/dashboard` | Master dashboard with all security subsystems |
+| Route | Purpose | Guard |
+|-------|---------|-------|
+| `/` | Login page (GradientMesh + glassmorphism card) | None |
+| `/setup` | BLE device pairing wizard (backend-driven) | `useSetupGuard()` — requires auth |
+| `/dashboard` | Master dashboard with all security subsystems | `useAuthGuard()` — requires auth + BLE |
 
 ---
 
@@ -330,9 +356,10 @@ The application has the following routes:
 | Area | Current | Production Requirement |
 |------|---------|----------------------|
 | WebSocket | `ws://` (unencrypted) | `wss://` with TLS termination |
-| Authentication | sessionStorage demo auth | OAuth 2.0 / SAML / enterprise SSO |
-| BLE | `localhost` exemption | HTTPS required for Web Bluetooth |
+| Authentication | sessionStorage demo auth (two-key) | OAuth 2.0 / SAML / enterprise SSO |
+| BLE | `localhost` backend Bleak | Same (Bleak works in production) |
 | CORS | `localhost:3000` only | Configure for production domain |
 | Backend host | `0.0.0.0:8000` | Reverse proxy (nginx) with SSL |
 | Logging | Console stdout | Structured logging to monitoring platform |
 | Process management | Manual `python main.py` | systemd / Docker / PM2 |
+| BLE config | `ble_config.json` on disk | Encrypted config or environment variable |

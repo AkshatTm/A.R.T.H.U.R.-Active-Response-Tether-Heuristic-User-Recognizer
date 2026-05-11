@@ -2,207 +2,233 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | A.R.T.H.U.R. — AI-Powered Zero-Trust Physical Endpoint Security |
+| **Product** | A.R.T.H.U.R. (Active Response Tether & Heuristic User Recognizer) |
 | **Version** | 2.0.0 |
+| **Author** | Akshat Tyagi |
 | **Status** | Feature-Complete |
-| **Last Updated** | 2026-03-02 |
-| **Authors** | Akshat Tomar |
-| **Stakeholders** | INT428 Faculty, LPU Computer Science Department |
+| **Last Updated** | 2026-04-17 |
 
 ---
 
-## 1. Executive Summary
+## 1. Problem Statement
 
-A.R.T.H.U.R. is a proactive, zero-trust physical endpoint security system designed to mitigate threats that traditional software-only security perimeters cannot address. It uses edge-compute computer vision, Bluetooth Low Energy proximity tethering, and adaptive UI obfuscation to continuously verify the physical security of a remote workspace — all processed locally with zero cloud dependency.
+Traditional endpoint security focuses on software perimeters — firewalls, VPNs, encrypted storage, and session timeouts. These safeguards are ineffective against **physical threats** to an unattended workstation:
 
-The system operates as a modular monolith: a Python-based AI sensory engine (FastAPI) communicates with a Next.js reactive frontend over local WebSockets, delivering sub-250ms threat response times.
+| Physical Threat | Software Defense | Gap |
+|----------------|-----------------|-----|
+| Shoulder surfing | None | Software can't detect who is looking at the screen |
+| User walks away, forgets to lock | OS lock timer (minutes) | Sensitive data visible during timeout window |
+| Unauthorized person approaches screen | None | No awareness of physical environment |
+| Device left unattended in public | None until timeout | Complete data exposure window |
 
----
-
-## 2. Problem Statement
-
-### 2.1 Context
-
-In enterprise remote and hybrid work environments (financial services, healthcare, government contractors), software-layer security is mature — VPNs, end-to-end encryption, multi-factor authentication, and JWT-based session management are industry standard. However, the **physical endpoint** remains the weakest link in the security chain.
-
-### 2.2 Identified Threats
-
-| Threat | Description | Current Mitigation | Gap |
-|--------|-------------|-------------------|-----|
-| **Shoulder Surfing** | Unauthorized bystander views sensitive screen content in shared/public spaces | Privacy screen filters (passive, easily circumvented) | No active detection or automated response |
-| **Device Abandonment** | User leaves machine unlocked while stepping away briefly | OS inactivity timeout (typically 5+ min), manual `Win+L` | Relies on human compliance; large vulnerability window |
-| **Unauthorized Access** | Opportunistic access to unlocked workstation | Password-based screen lock | No continuous physical presence verification |
-
-### 2.3 Root Cause
-
-Existing endpoint protections are **reactive** and **compliance-dependent**. A true zero-trust architecture requires continuous, automated, multi-factor physical presence authentication that operates independently of user behavior.
+**A.R.T.H.U.R.** addresses this gap by creating a **continuous, real-time physical security envelope** around the workstation using computer vision and hardware proximity tethering — with zero cloud dependency and complete local processing.
 
 ---
 
-## 3. Product Vision
+## 2. Solution Overview
 
-> **Shift endpoint security from reactive to proactive** by fusing real-time computer vision, hardware proximity sensing, and adaptive UI to create a workspace that autonomously defends its own physical perimeter.
+A.R.T.H.U.R. is an **edge-compute, zero-trust physical endpoint security system** that fuses three independent security signals into a deterministic state machine:
 
-### 3.1 Core Security Pillars
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Security Signal Fusion                       │
+│                                                                     │
+│  Camera (MediaPipe)     BLE Tether (Bleak)     Color (K-Means)     │
+│  ──────────────────     ─────────────────      ─────────────────   │
+│  face_count: int        ble_connected: bool     dominant_color: hex│
+│  ─1 = fault             true = in range         Theme adjustment   │
+│   0 = absent            false = away/no device                     │
+│   1 = secure                                                       │
+│   2+ = intruder                                                    │
+│                                                                     │
+│           ┌─────────────────────────────────┐                      │
+│           │    deriveSecurityState()          │                      │
+│           │    Priority-ordered evaluation    │                      │
+│           └───────────────┬─────────────────┘                      │
+│                           │                                         │
+│               ┌───────────┼───────────┐                            │
+│               ▼           ▼           ▼                            │
+│            LOCKED      BLURRED     SECURE                          │
+│           (BLE away)  (cam issue) (all clear)                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-| # | Pillar | Mechanism | Response |
-|---|--------|-----------|----------|
-| 1 | **Active Obfuscation** | MediaPipe face detection via local webcam | UI blurs when 0 or 2+ faces detected |
-| 2 | **Proximity Tether** | Web Bluetooth RSSI monitoring of paired BLE device | Session hard-locks when device leaves ~2 m range |
-| 3 | **Chameleon UI** | K-Means dominant color extraction from camera ROI | Adaptive theming provides visual clearance feedback |
+---
 
-### 3.2 Design Principles
+## 3. Security Pillars
 
-- **Privacy by Design** — No images are saved, recorded, or transmitted. Only metadata (integers and strings) leaves the vision pipeline.
-- **Fail-Closed Security** — Every sensor failure defaults to the most restrictive state (LOCKED or BLURRED), never SECURE.
-- **Edge-Only Processing** — All computation happens on the local machine. No external API calls, no cloud services.
-- **Zero-Trust Physical Model** — The system never assumes the user is present; it continuously proves it.
+### Pillar 1: Active Obfuscation (Camera)
+
+| Requirement | Detail |
+|-------------|--------|
+| **Sensor** | MediaPipe BlazeFace short-range model (CPU-optimized, ≤ 2m range) |
+| **Input** | Webcam video stream at ~15-30 FPS |
+| **Output** | Integer face count: `-1` (fault), `0` (absent), `1` (secure), `2+` (intruder) |
+| **Action** | `face_count ≠ 1` → apply `blur(24px) + grayscale(80%)` to all sensitive content |
+| **Latency** | Face detection runs every frame; < 250ms end-to-end pipeline |
+| **Privacy** | No frames saved, transmitted, or logged. Only face count integers leave the pipeline |
+
+### Pillar 2: Hardware Proximity Tether (Bluetooth)
+
+| Requirement | Detail |
+|-------------|--------|
+| **Sensor** | Python Bleak library (backend-driven BLE, cross-platform) |
+| **Input** | RSSI readings from a paired BLE or classic Bluetooth device |
+| **Output** | `ble_connected: boolean` pushed via WebSocket + `ble_rssi`, `ble_distance_m` |
+| **Action** | `ble_connected = false` → LOCKED state (overrides camera) |
+| **Range** | ~2m threshold (RSSI ≈ -70 dBm, configurable via path loss model) |
+| **Pairing** | Backend REST API: scan → pair → auto-reconnect on restart |
+| **Persistence** | Paired device config saved to `ble_config.json` |
+| **Auto-logout** | 8-second grace period on disconnect; session cleared if not restored |
+| **Bypass** | `NEXT_PUBLIC_BLE_BYPASS=true` disables tether for development/demos |
+
+### Pillar 3: Chameleon UI (Adaptive Theming)
+
+| Requirement | Detail |
+|-------------|--------|
+| **Sensor** | MiniBatchKMeans clustering on center 100×100px ROI |
+| **Input** | Camera frame center region, sampled at 1 Hz |
+| **Output** | 7-character HEX string (`dominant_color`) |
+| **Action** | CSS custom properties (`--theme-primary`, `--chameleon-bg`, `--theme-glow`) update via Motion Value Tunnelling at 60fps |
+| **Guard** | Colors with S < 15% or L < 10% are rejected (Saturation Guard) |
 
 ---
 
 ## 4. Functional Requirements
 
-### FR-1: Real-Time Face Detection
+### 4.1 Core Features
 
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-1.1 | System shall capture video from the default system webcam | P0 | `cv2.VideoCapture(0)` initializes successfully; graceful degradation on failure |
-| FR-1.2 | System shall count human faces in each frame using MediaPipe | P0 | Accurate count at ≥15 FPS on standard CPU hardware |
-| FR-1.3 | Face count shall be broadcast to frontend at 10 Hz | P0 | WebSocket payload received every ~100ms |
-| FR-1.4 | Camera failures shall be reported as `face_count: -1` | P0 | Frontend treats `-1` as security fault → BLURRED |
+| ID | Feature | Description | Status |
+|----|---------|-------------|--------|
+| FR-01 | Face detection | Continuous face counting with MediaPipe BlazeFace at every-frame rate | ✅ |
+| FR-02 | Security blur | Instant privacy filter (`blur(24px) + grayscale(80%)`) on face count ≠ 1 | ✅ |
+| FR-03 | BLE proximity tether | Backend Bleak-based device monitoring with RSSI→distance conversion | ✅ |
+| FR-04 | Screen lock | Full-screen overlay when BLE device out of range | ✅ |
+| FR-05 | Chameleon theming | Real-time CSS variable updates from dominant color extraction | ✅ |
+| FR-06 | Health monitoring | `GET /health` endpoint with engine status, BLE state, and uptime | ✅ |
+| FR-07 | Single-client limit | WebSocket enforces one active client (close code 4001) | ✅ |
+| FR-08 | Graceful lifecycle | Camera release, BLE shutdown, WS close on SIGINT/SIGTERM | ✅ |
+| FR-09 | Debug overlay | OpenCV window showing face boxes, ROI, FPS, color swatch (gated by `SENTRY_DEBUG=1`) | ✅ |
+| FR-10 | Presentation mode | Keyboard overrides (`Ctrl+Shift+L/B/S/0`) for live demos | ✅ |
+| FR-11 | Auth flow | Login → BLE Setup → Dashboard with two-key sessionStorage guard | ✅ |
+| FR-12 | BLE auto-logout | 8-second grace period on disconnect; session cleared if not restored | ✅ |
+| FR-13 | BLE auto-reconnect | Backend auto-connects to saved device on startup from `ble_config.json` | ✅ |
+| FR-14 | 3D interactive cards | TiltCard with mouse-tracked perspective, specular highlight | ✅ |
+| FR-15 | Animated metrics | NumberFlip entrance animation for dashboard metric values | ✅ |
+| FR-16 | Gradient mesh background | Animated 3-color gradient mesh on login/setup pages | ✅ |
 
-### FR-2: Dominant Color Extraction
+### 4.2 Non-Functional Requirements
 
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-2.1 | System shall extract a 100×100px center-frame ROI | P1 | ROI centered regardless of input resolution |
-| FR-2.2 | MiniBatchKMeans shall compute the dominant HEX color | P1 | Valid 7-character HEX string (e.g., `#4A90E2`) |
-| FR-2.3 | Color extraction shall run at 1 Hz (rate-limited) | P1 | CPU usage remains stable; no thermal throttling |
-| FR-2.4 | Desaturated colors (S < 15%) and near-black (L < 10%) shall be rejected | P1 | Chameleon holds last vivid color; no grey/black themes |
-
-### FR-3: Proximity Tether (Bluetooth)
-
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-3.1 | System shall pair with a generic BLE device via `navigator.bluetooth.requestDevice()` | P0 | Pairing dialog opens on user click; device name displayed after pairing |
-| FR-3.2 | System shall poll RSSI via `watchAdvertisements()` with GATT fallback | P0 | RSSI values update; GATT fallback activates on unsupported browsers |
-| FR-3.3 | RSSI below `-70 dBm` shall trigger LOCKED state | P0 | UI transitions to lock screen within 250ms of threshold breach |
-| FR-3.4 | 10-second RSSI staleness shall auto-lock the session | P0 | No advertisements for 10s → `isDisconnected = true` |
-| FR-3.5 | Absent BLE support shall default to LOCKED (fail-closed) | P0 | `isDisconnected: true` when `navigator.bluetooth` unavailable |
-| FR-3.6 | `NEXT_PUBLIC_BLE_BYPASS=true` shall disable the tether for development | P2 | Vision-only security operates independently |
-
-### FR-4: Security State Machine
-
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-4.1 | System shall derive a single `SecurityState` from all sensor inputs | P0 | `deriveSecurityState()` passes truth table test cases |
-| FR-4.2 | Bluetooth absence shall be absolute override (LOCKED) | P0 | Camera data ignored when BLE disconnected |
-| FR-4.3 | Exactly 1 face + BLE present → SECURE | P0 | UI fully visible and interactive |
-| FR-4.4 | All other combinations → BLURRED | P0 | `blur(24px) + grayscale(80%)` applied |
-
-### FR-5: UI Obfuscation & Theming
-
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-5.1 | GlassOverlay shall apply CSS `filter` variants per state | P0 | Smooth 400ms transitions between SECURE/BLURRED/LOCKED |
-| FR-5.2 | LockScreen shall display full-screen overlay in LOCKED state | P0 | RSSI meter, device info, re-pair button visible |
-| FR-5.3 | ChameleonWrapper shall update CSS variables at 60 fps | P1 | Color transitions via Framer Motion with zero re-renders |
-| FR-5.4 | All colors shall use CSS custom properties (no hardcoded hex) | P1 | `var(--theme-primary)` used throughout |
-
-### FR-6: Presentation Mode
-
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-6.1 | Keyboard shortcuts shall override sensor-derived state | P1 | `Ctrl+Shift+L/B/S/0` work as documented |
-| FR-6.2 | Override indicator shall be visible only to presenter | P1 | Subtle bottom-right toast + yellow strip below topbar |
-| FR-6.3 | `Ctrl+Shift+0` shall release override and resume sensors | P1 | State returns to live sensor derivation |
-
-### FR-7: Authentication
-
-| ID | Requirement | Priority | Acceptance Criteria |
-|----|-------------|----------|-------------------|
-| FR-7.1 | Login page shall authenticate via sessionStorage | P1 | `sentry_auth` key set on successful login |
-| FR-7.2 | Dashboard shall redirect to `/` if unauthenticated | P1 | `useAuthGuard` redirects immediately |
-| FR-7.3 | Session shall expire on tab close | P1 | `sessionStorage` cleared by browser |
+| ID | Requirement | Target | Status |
+|----|------------|--------|--------|
+| NFR-01 | End-to-end latency (camera → UI) | < 250ms | ✅ |
+| NFR-02 | WebSocket broadcast rate | 10 Hz (100ms) | ✅ |
+| NFR-03 | Memory footprint | < 300 MB (Python + Node.js) | ✅ |
+| NFR-04 | No external dependencies | Zero cloud/network calls | ✅ |
+| NFR-05 | Frame privacy | No persistence or transmission of image data | ✅ |
+| NFR-06 | Fail-closed security | Any sensor failure → restrictive state | ✅ |
+| NFR-07 | Color transition FPS | 60fps (Motion Value Tunnelling) | ✅ |
+| NFR-08 | Reconnect resilience | Exponential backoff (1s → 5s cap) | ✅ |
+| NFR-09 | Type safety | `tsc --noEmit` with zero errors | ✅ |
+| NFR-10 | React 18 Strict Mode | Safe mount-unmount-remount cycle | ✅ |
+| NFR-11 | BLE auto-logout grace period | 8 seconds | ✅ |
 
 ---
 
-## 5. Non-Functional Requirements
+## 5. Security State Machine
 
-| ID | Category | Requirement | Target |
-|----|----------|-------------|--------|
-| NFR-1 | **Latency** | End-to-end response (face enters frame → UI blurs) | < 250ms |
-| NFR-2 | **Frame Rate** | Vision pipeline on standard laptop CPU | ≥ 15 FPS |
-| NFR-3 | **Privacy** | Zero frame persistence (no save/record/transmit) | 100% compliance |
-| NFR-4 | **Resilience** | Frontend operates with mock data when backend offline | Graceful degradation |
-| NFR-5 | **Performance** | Frontend render cycle unaffected by color updates | 60 FPS maintained |
-| NFR-6 | **Compatibility** | Web Bluetooth support | Chrome 91+ required |
-| NFR-7 | **Security Posture** | Default state on any sensor failure | Fail-closed (LOCKED or BLURRED) |
+### 5.1 States
 
----
+| State | Trigger | Visual Effect | User Action Required |
+|-------|---------|---------------|---------------------|
+| **SECURE** | `ble_connected = true` AND `face_count = 1` | No filter, full dashboard visible | None |
+| **BLURRED** | Camera fault or `face_count ≠ 1` (while BLE connected) | `blur(24px) + grayscale(80%)` | Look at camera (or remove extra viewers) |
+| **LOCKED** | `ble_connected = false` | Full-screen lock with RSSI meter | Move paired device within ~2m range |
 
-## 6. Data Contract
+### 5.2 Priority Order (Fail-Closed)
 
-### 6.1 WebSocket Payload (Backend → Frontend)
-
-```json
-{
-  "face_count": 1,
-  "dominant_color": "#4A90E2",
-  "system_status": "active",
-  "timestamp": 1678882345.123
-}
+```
+Priority 1: BLE disconnected          → LOCKED  (highest)
+Priority 2: WebSocket offline          → BLURRED
+Priority 3: Camera fault (face = -1)   → BLURRED
+Priority 4: No face (face = 0)         → BLURRED
+Priority 5: Multiple faces (face > 1)  → BLURRED
+Priority 6: Single face (face = 1)     → SECURE  (lowest)
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `face_count` | `int` | `-1` = camera fault, `0` = no face, `1+` = detected count |
-| `dominant_color` | `string` | 7-character HEX color (e.g., `"#4A90E2"`) |
-| `system_status` | `string` | `"initializing"` · `"active"` · `"camera_unavailable"` |
-| `timestamp` | `float` | Unix epoch seconds |
+### 5.3 Override Layer
 
-> See [API Reference](API_REFERENCE.md) for complete protocol documentation.
+Presentation mode overrides sit **above** the state machine:
 
----
+```
+finalSecurityState = presentationOverride ?? deriveSecurityState(sensors)
+```
 
-## 7. Security State Truth Table
-
-| BLE Status | Face Count | Derived State | Visual Effect |
-|------------|-----------|--------------|---------------|
-| Disconnected | Any | **LOCKED** | Full lock screen overlay |
-| Connected | `null` / WS offline | **BLURRED** | `blur(24px) + grayscale(80%)` |
-| Connected | `-1` (camera fault) | **BLURRED** | `blur(24px) + grayscale(80%)` |
-| Connected | `0` (no face) | **BLURRED** | `blur(24px) + grayscale(80%)` |
-| Connected | `> 1` (multiple faces) | **BLURRED** | `blur(24px) + grayscale(80%)` |
-| Connected | `1` (single face) | **SECURE** | Full UI visible |
-
-> **Rule:** Bluetooth is the absolute override. If hardware is absent, camera data is ignored and the system defaults to maximum security.
+Overrides are visual only. Sensor data continues flowing; security events continue logging.
 
 ---
 
-## 8. Out of Scope
+## 6. User Flows
 
-The following are explicitly excluded from the current version:
+### 6.1 First-Time Setup
 
-- User identity verification (facial recognition / biometric matching)
-- Multi-user role-based access control
-- Cloud-based processing or remote API integrations
-- Database persistence (stateless by design)
-- Production HTTPS/WSS configuration
-- Mobile device native application
-- Audit logging to external systems
+```
+1. Start backend: python main.py
+2. Start frontend: npm run dev
+3. Open http://localhost:3000
+4. Login page → Enter password → Submit
+5. BLE Setup page → Scan for devices → Select device → Auto-pair
+6. Dashboard loads with SECURE state (if face detected and BLE in range)
+```
+
+### 6.2 Returning User
+
+```
+1. Start backend (auto-connects to saved BLE device)
+2. Start frontend
+3. Login → Auto-redirect to /setup → Auto-detect paired device
+4. "Continue to Dashboard" button → Dashboard with SECURE state
+```
+
+### 6.3 BLE Disconnect Recovery
+
+```
+1. User walks away with paired device
+2. RSSI drops below threshold → ble_connected = false → LOCKED
+3. useBleAutoLogout starts 8-second grace period
+4a. User returns within 8 seconds → Timer resets → LOCKED → SECURE
+4b. User doesn't return → Grace period expires → Session cleared → Redirect to /
+```
 
 ---
 
-## 9. Glossary
+## 7. Acceptance Criteria
 
-| Term | Definition |
-|------|-----------|
-| **BLE** | Bluetooth Low Energy — wireless protocol for short-range communication |
-| **RSSI** | Received Signal Strength Indicator — signal power measurement in dBm |
-| **ROI** | Region of Interest — cropped subsection of a video frame |
-| **K-Means** | Unsupervised clustering algorithm used for dominant color extraction |
-| **MediaPipe** | Google's open-source framework for ML-based perception pipelines |
-| **Fail-Closed** | Security posture where failures default to the most restrictive state |
-| **ADR** | Architecture Decision Record — documented architectural choice |
-| **GATT** | Generic Attribute Profile — Bluetooth LE data exchange protocol |
+| Criterion | Test | Pass Condition |
+|-----------|------|----------------|
+| Face detection accuracy | Point camera at face, verify count = 1 | Count matches visible faces |
+| Privacy blur | Cover camera → look at screen → cover again | Blur applies within 0.5s |
+| BLE lock | Walk away with paired device | Lock screen appears when out of range |
+| BLE auto-restore | Return with paired device | Lock screen disappears automatically |
+| BLE auto-logout | Walk away for 8+ seconds | Session cleared, redirected to login |
+| Chameleon | Show colored object to camera | Background glow shifts within 2s |
+| Presentation override | Press Ctrl+Shift+S while BLURRED | Screen instantly clears |
+| Auth guard | Navigate to /dashboard without logging in | Redirected to / |
+| Setup guard | Navigate to /dashboard without BLE pairing | Redirected to /setup |
+| Health endpoint | GET /health | Returns 200 with engine status and BLE state |
+| Single-client | Open two browser tabs with /dashboard | Second tab shows reconnection loop |
+| Debug overlay | Set SENTRY_DEBUG=1 → restart backend | OpenCV window with face boxes, ROI, FPS, color |
+
+---
+
+## 8. Future Considerations
+
+| Feature | Priority | Description |
+|---------|----------|-------------|
+| Face recognition | P2 | Identify specific authorized users (not just count) |
+| Multi-monitor | P3 | Extend blur to additional displays |
+| Mobile companion | P3 | Native BLE app for persistent tethering |
+| Session recording | P3 | Audit log of security events with timestamps |
+| Remote management | P4 | Admin dashboard for fleet deployment |
+| TLS/HTTPS | P1 | Required for any non-localhost deployment |
+| Real authentication | P1 | Replace demo sessionStorage with production auth |

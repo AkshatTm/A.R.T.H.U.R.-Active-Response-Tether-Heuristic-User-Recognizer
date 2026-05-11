@@ -2,10 +2,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Product** | SentryOS |
+| **Product** | A.R.T.H.U.R. |
 | **Version** | 2.0.0 |
 | **Architecture** | Modular Monolith (Python Backend / Next.js Frontend) |
-| **Last Updated** | 2026-03-02 |
+| **Last Updated** | 2026-04-17 |
 
 ---
 
@@ -51,7 +51,13 @@
 | **scikit-learn** | ≥ 1.3.0 | Dominant color extraction | `MiniBatchKMeans` provides fast, incremental clustering on small pixel arrays |
 | **NumPy** | ≥ 1.24.0 | Array operations | Bridge between OpenCV BGR frames and scikit-learn feature matrices |
 
-### 2.4 Backend Dependencies (`requirements.txt`)
+### 2.4 Bluetooth Low Energy
+
+| Package | Version | Purpose | Rationale |
+|---------|---------|---------|-----------|
+| **Bleak** | ≥ 0.21.0 | Cross-platform BLE scanner/client | Async BLE library using Windows WinRT, macOS CoreBluetooth, and Linux BlueZ backends. Eliminates browser Web Bluetooth limitations (experimental Chrome flags, HTTPS requirement, no classic BT support). Enables persistent device config, auto-reconnect, and RSSI-to-distance calculation server-side |
+
+### 2.5 Backend Dependencies (`requirements.txt`)
 
 ```
 fastapi>=0.100.0
@@ -61,6 +67,7 @@ mediapipe>=0.10.0
 opencv-python>=4.8.0
 scikit-learn>=1.3.0
 numpy>=1.24.0
+bleak>=0.21.0
 ```
 
 ---
@@ -83,30 +90,47 @@ numpy>=1.24.0
 | **React DOM** | ^18 | DOM renderer | Standard React DOM binding |
 | **TypeScript** | ^5 | Static typing | Strict typing on WebSocket payloads, component props, and hook contracts prevents integration errors |
 
-### 3.3 Styling & Animation
+### 3.3 Typography
+
+| Font | Source | Role | Usage |
+|------|--------|------|-------|
+| **Satoshi** | Fontshare CDN (`@font-face` in `globals.css`) | Display / Headlines | `--font-display`: TopBar branding, dashboard titles, login page |
+| **Space Grotesk** | Google Fonts (Next.js `next/font`) | Body / UI text | `--font-body`: Labels, descriptions, buttons, table headers |
+| **IBM Plex Mono** | Google Fonts (Next.js `next/font`) | Code / Data values | `--font-mono`: Terminal output, metric values, MAC addresses, timestamps |
+
+### 3.4 Styling & Animation
 
 | Package | Version | Purpose | Rationale |
 |---------|---------|---------|-----------|
 | **Tailwind CSS** | ^3.4.19 | Utility-first CSS | Rapid layout, `backdrop-blur` glass-morphism effects, CSS variable integration via `var()` |
 | **PostCSS** | ^8.5.6 | CSS transformer | Required by Tailwind build pipeline |
 | **Autoprefixer** | ^10.4.27 | Vendor prefixing | Cross-browser CSS compatibility |
-| **Framer Motion** | ^12.34.3 | Animation engine | `MotionValue` tunnelling for CSS variable interpolation at 60fps; `AnimatePresence` for mount/unmount transitions; `filter` animation for blur/grayscale |
+| **Framer Motion** | ^12.34.3 | Animation engine | `MotionValue` tunnelling for CSS variable interpolation at 60fps; `AnimatePresence` for mount/unmount transitions; `filter` animation for blur/grayscale; `useSpring` for TiltCard physics |
 
-### 3.4 UI Components
+### 3.5 UI Components
 
 | Package | Version | Purpose | Rationale |
 |---------|---------|---------|-----------|
-| **Lucide React** | ^0.576.0 | Icon library | Lightweight tree-shakeable SVGs; consistent stroke style; icons for Lock, Bluetooth, Shield, etc. |
+| **Lucide React** | ^0.576.0 | Icon library | Lightweight tree-shakeable SVGs; consistent stroke style; icons for Lock, Bluetooth, Shield, Eye, etc. |
 
-### 3.5 Browser APIs (No npm package required)
+### 3.6 Custom Components (In-House)
+
+| Component | Purpose | Key Technology |
+|-----------|---------|---------------|
+| **TiltCard** | 3D perspective card with mouse tracking | `useSpring` + `useTransform` from Framer Motion |
+| **NumberFlip** | Animated number entrance with blur fade | `motion.span` with key-based remount |
+| **GradientMesh** | Animated 3-color gradient mesh background | 3 `motion.div` blobs with independent animation cycles |
+
+### 3.7 Browser APIs (No npm package required)
 
 | API | Specification | Browser Support | Purpose |
 |-----|--------------|----------------|---------|
-| **WebSocket** | RFC 6455 | All modern browsers | Real-time communication with Python backend |
-| **Web Bluetooth** | W3C Draft | Chrome 91+ (experimental flag may be required) | BLE device pairing, RSSI polling, proximity detection |
-| **sessionStorage** | Web Storage API | All modern browsers | Demo authentication state |
+| **WebSocket** | RFC 6455 | All modern browsers | Real-time communication with Python backend (camera + BLE data) |
+| **sessionStorage** | Web Storage API | All modern browsers | Two-key demo authentication state (`sentry_auth` + `sentry_ble_paired`) |
 
-### 3.6 Development Dependencies
+> **Note:** Web Bluetooth (`navigator.bluetooth`) is no longer used for core BLE functionality as of v2.0.0. All BLE operations are handled by the Python backend using Bleak. The `bluetooth.d.ts` type augmentations remain for potential future use.
+
+### 3.8 Development Dependencies
 
 | Package | Version | Purpose |
 |---------|---------|---------|
@@ -121,14 +145,14 @@ numpy>=1.24.0
 
 ## 4. Excluded Technologies
 
-The following are explicitly **not used** in SentryOS, by design:
+The following are explicitly **not used** in A.R.T.H.U.R., by design:
 
 | Category | Excluded | Reason |
 |----------|----------|--------|
-| **Database** | PostgreSQL, SQLite, Prisma, SQLAlchemy | Stateless edge system; no persistence required |
+| **Database** | PostgreSQL, SQLite, Prisma, SQLAlchemy | Stateless edge system; no persistence required (except `ble_config.json`) |
 | **HTTP Client** | Axios, node-fetch | Native `WebSocket` and `fetch` APIs are sufficient |
 | **State Management** | Redux, Zustand, Jotai | React Context + custom hooks provide adequate state management |
-| **BLE Library** | noble, react-bluetooth | Native `navigator.bluetooth` preferred for security and bundle size |
+| **BLE Library (Frontend)** | noble, react-bluetooth | Backend Bleak handles all BLE; native `fetch` for REST endpoints |
 | **Date/Time** | Moment.js, Day.js | Unix timestamps from `time.time()` are sufficient |
 | **CSS-in-JS** | styled-components, Emotion | Tailwind CSS + CSS variables cover all styling needs |
 | **Heavy ML Models** | YOLO, dlib, OpenCV Haar | MediaPipe BlazeFace is faster and more accurate on low-end hardware |
@@ -149,6 +173,6 @@ The following are explicitly **not used** in SentryOS, by design:
 
 | Backend | Frontend | Protocol | Status |
 |---------|----------|----------|--------|
-| Python 3.10 + FastAPI 0.100 | Next.js 14 + React 18 | ADR-01 JSON v1.0.0 | **Current** |
+| Python 3.10 + FastAPI 0.100 + Bleak 0.21 | Next.js 14 + React 18 | ADR-01 JSON v2.0.0 (with BLE fields) | **Current** |
 
-The backend and frontend communicate exclusively through the ADR-01 WebSocket JSON contract. Either side can be upgraded independently as long as the contract is maintained.
+The backend and frontend communicate exclusively through the ADR-01 WebSocket JSON contract and BLE REST endpoints. Either side can be upgraded independently as long as the contracts are maintained.

@@ -29,7 +29,7 @@ The system fuses three independent security signals into a deterministic state m
 | Signal | Technology | Threat Mitigated |
 |--------|-----------|-----------------|
 | **Face Detection** | MediaPipe + OpenCV | Shoulder surfing (multiple faces), user absence (zero faces) |
-| **Proximity Tether** | Web Bluetooth RSSI | Device abandonment (user walks away) |
+| **Proximity Tether** | Python Bleak BLE (backend-driven) | Device abandonment (user walks away) |
 | **Chameleon UI** | K-Means color extraction | Visual clearance feedback via ambient color theming |
 
 ## Architecture
@@ -37,21 +37,25 @@ The system fuses three independent security signals into a deterministic state m
 ```
 ┌─────────────────────────────┐     WebSocket (10 Hz)     ┌──────────────────────────────┐
 │     Python Backend          │ ──────────────────────►   │      Next.js Frontend        │
-│                             │    JSON sensor payload     │                              │
+│                             │  JSON sensor + BLE payload │                              │
 │  ┌────────────────────────┐ │                            │  ┌────────────────────────┐  │
 │  │ Vision Thread (daemon) │ │                            │  │ useSecuritySocket()    │  │
 │  │  • MediaPipe faces     │ │                            │  │ useProximityTether()   │  │
 │  │  • K-Means color       │ │                            │  │ useSecurityState()     │  │
-│  └──────────┬─────────────┘ │                            │  └──────────┬─────────────┘  │
-│             │ mutex          │                            │             │                │
-│  ┌──────────▼─────────────┐ │                            │  ┌──────────▼─────────────┐  │
-│  │ ThreadSafeState        │ │                            │  │ Security State Machine │  │
-│  └──────────┬─────────────┘ │                            │  │ SECURE/BLURRED/LOCKED  │  │
-│             │                │                            │  └────────────────────────┘  │
-│  ┌──────────▼─────────────┐ │                            │  ┌────────────────────────┐  │
-│  │ FastAPI /ws broadcaster│ │                            │  │ GlassOverlay + Lock    │  │
-│  └────────────────────────┘ │                            │  │ ChameleonWrapper       │  │
-│                             │                            │  └────────────────────────┘  │
+│  └──────────┬─────────────┘ │  REST (scan/pair/unpair)   │  │ useBleAutoLogout()     │  │
+│             │ mutex          │ ◄────────────────────────  │  └──────────┬─────────────┘  │
+│  ┌──────────▼─────────────┐ │                            │             │                │
+│  │ ThreadSafeState        │ │                            │  ┌──────────▼─────────────┐  │
+│  └──────────┬─────────────┘ │                            │  │ Security State Machine │  │
+│             │                │                            │  │ SECURE/BLURRED/LOCKED  │  │
+│  ┌──────────▼─────────────┐ │                            │  └────────────────────────┘  │
+│  │ FastAPI /ws broadcaster│ │                            │  ┌────────────────────────┐  │
+│  └────────────────────────┘ │                            │  │ GlassOverlay + Lock    │  │
+│  ┌────────────────────────┐ │                            │  │ ChameleonWrapper       │  │
+│  │ BLETetherService       │ │                            │  │ TiltCard + NumberFlip  │  │
+│  │  • Bleak scan/pair     │ │                            │  │ GradientMesh           │  │
+│  │  • RSSI monitoring     │ │                            │  └────────────────────────┘  │
+│  └────────────────────────┘ │                            │                              │
 └─────────────────────────────┘                            └──────────────────────────────┘
 ```
 
@@ -61,13 +65,19 @@ The system fuses three independent security signals into a deterministic state m
 Real-time face counting via MediaPipe. If **zero or more than one** face appears in the frame, the UI instantly applies a cryptographic blur (`blur(24px) + grayscale(80%)`) to all sensitive content.
 
 ### Hardware Proximity Tether (Bluetooth)
-Binds the browser session to a BLE device (smartwatch, earbuds). If the device RSSI drops below `-70 dBm` (~2 m range), the session hard-locks with a full-screen overlay.
+The **Python backend** manages BLE proximity via the Bleak library. It scans, pairs, and continuously monitors RSSI of a paired Bluetooth device (earbuds, smartwatch, phone). If the device RSSI drops below the threshold (~2 m range), the session hard-locks. Device config is persisted to `ble_config.json` for automatic reconnection on restart.
 
 ### Chameleon UI (Adaptive Theming)
 Extracts the dominant color from a center-frame ROI using MiniBatchKMeans clustering. CSS custom properties update at 60 fps via Framer Motion value tunnelling — zero React re-renders.
 
+### 3D Interactive Dashboard
+The redesigned dashboard features **TiltCard** 3D mouse-tracked perspective cards, **NumberFlip** animated metric values, and a **Catppuccin-inspired** code panel with syntax highlighting. Typography uses Satoshi (display), Space Grotesk (body), and IBM Plex Mono (code).
+
 ### Presentation Mode
 Keyboard shortcuts (`Ctrl+Shift+L/B/S/0`) override sensor-driven state for live demos. A subtle presenter-only toast confirms the active override.
+
+### BLE Auto-Logout Watchdog
+When a paired BLE device disconnects, an 8-second grace-period countdown begins. If the device doesn't reconnect within that window, the session is automatically cleared and the user is logged out.
 
 ## Quick Start
 
@@ -76,7 +86,8 @@ Keyboard shortcuts (`Ctrl+Shift+L/B/S/0`) override sensor-driven state for live 
 - **Python 3.10+** with `pip`
 - **Node.js 20 LTS+** with `npm`
 - **Webcam** (built-in laptop camera or USB)
-- **Google Chrome 91+** (for Web Bluetooth support)
+- **Google Chrome 91+** (for UI and Web Bluetooth fallback)
+- **Bluetooth adapter** (optional — backend handles BLE via Bleak)
 
 ### Backend
 
@@ -94,7 +105,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The backend starts at `http://localhost:8000` with a WebSocket endpoint at `ws://localhost:8000/ws`.
+The backend starts at `http://localhost:8000` with:
+- WebSocket endpoint at `ws://localhost:8000/ws`
+- BLE REST API at `/bluetooth/scan`, `/bluetooth/pair`, `/bluetooth/status`, `/bluetooth/unpair`
 
 ### Frontend
 
@@ -120,7 +133,8 @@ The frontend starts at `http://localhost:3000`.
 | Check | How | Expected |
 |-------|-----|----------|
 | Backend health | `GET http://localhost:8000/health` | `{"status": "ok", ...}` |
-| WebSocket data | Open `/dashboard` → watch TopBar | Green `WS` chip, live face count |
+| BLE status | `GET http://localhost:8000/bluetooth/status` | `{"connected": false, ...}` |
+| WebSocket data | Open `/dashboard` → watch TopBar | Green WS dot, live face count |
 | Camera | Look at webcam | Face count = `1` in TopBar |
 | Chameleon | Hold colored object to camera | Background glow shifts to match |
 
@@ -128,9 +142,21 @@ The frontend starts at `http://localhost:3000`.
 
 | Path | Description |
 |------|-------------|
-| `/` | Login page (glassmorphism, session auth) |
-| `/setup` | BLE device pairing wizard |
+| `/` | Login page (glassmorphism card, GradientMesh background, session auth) |
+| `/setup` | BLE device pairing wizard (backend-driven scan + pair) |
 | `/dashboard` | Master integrated dashboard with all security subsystems |
+
+### Authentication Flow
+
+```
+Login (/) → BLE Setup (/setup) → Dashboard (/dashboard)
+```
+
+Two session keys are managed via `sessionStorage`:
+- `sentry_auth` — set on successful login
+- `sentry_ble_paired` — set after BLE device is confirmed on `/setup`
+
+The dashboard requires **both** keys. Missing auth redirects to `/`, missing BLE redirects to `/setup`.
 
 ## Demo Mode
 
@@ -148,39 +174,48 @@ During presentations, use keyboard shortcuts to override live sensor state:
 ```
 SentryOS_Project/
 ├── backend/
-│   ├── main.py                  # FastAPI app, WebSocket broadcaster, health probe
+│   ├── main.py                  # FastAPI app, WebSocket broadcaster, BLE REST endpoints
 │   ├── models.py                # SensorPayload dataclass, ThreadSafeState (mutex)
 │   ├── vision_thread.py         # Camera capture loop, frame orchestrator
 │   ├── vision_tracker.py        # MediaPipe face detection wrapper
 │   ├── color_extractor.py       # ROI → K-Means → HEX color
-│   ├── ble_tether.py            # BLE proximity tether service
-│   ├── ble_config.py            # BLE device config persistence
-│   └── requirements.txt         # Python dependencies
+│   ├── ble_tether.py            # BLE proximity tether service (Bleak)
+│   ├── ble_config.py            # BLE device config persistence (JSON)
+│   ├── ble_config.json          # Persisted paired device config
+│   ├── start_backend.ps1        # PowerShell launcher (avoids stderr issues)
+│   └── requirements.txt         # Python dependencies (incl. bleak)
 │
 ├── frontend/
 │   └── src/
 │       ├── app/
-│       │   ├── page.tsx              # Login page
-│       │   ├── setup/page.tsx        # BLE setup wizard
-│       │   └── dashboard/page.tsx    # Master dashboard
+│       │   ├── page.tsx              # Login page (GradientMesh + glassmorphism)
+│       │   ├── layout.tsx            # Root layout (Space Grotesk + IBM Plex Mono)
+│       │   ├── globals.css           # Design token system + CSS utilities
+│       │   ├── setup/page.tsx        # BLE setup wizard (backend-driven)
+│       │   └── dashboard/page.tsx    # Master dashboard (TiltCard + NumberFlip)
 │       ├── components/
 │       │   ├── ChameleonWrapper.tsx   # CSS variable injection engine
 │       │   ├── GlassOverlay.tsx       # Security blur/lock filter
-│       │   └── LockScreen.tsx         # Full-screen BLE lock overlay
+│       │   ├── LockScreen.tsx         # Full-screen BLE lock overlay
+│       │   ├── GradientMesh.tsx       # Animated 3-color gradient mesh background
+│       │   ├── TiltCard.tsx           # 3D mouse-tracked perspective tilt card
+│       │   └── NumberFlip.tsx         # Animated number entrance component
 │       ├── context/
 │       │   └── PresentationModeContext.tsx  # Keyboard override engine
-│       └── hooks/
-│           ├── useSecuritySocket.ts   # WebSocket client
-│           ├── useProximityTether.ts  # Web Bluetooth lifecycle
-│           ├── useSecurityState.ts    # Security state machine
-│           ├── useBleAutoLogout.ts    # BLE disconnect auto-logout
-│           └── useAuthGuard.ts        # Session route guard
+│       ├── hooks/
+│       │   ├── useSecuritySocket.ts   # WebSocket client (camera + BLE data)
+│       │   ├── useProximityTether.ts  # BLE REST actions (scan/pair/unpair)
+│       │   ├── useSecurityState.ts    # Security state machine
+│       │   ├── useBleAutoLogout.ts    # BLE disconnect auto-logout watchdog
+│       │   └── useAuthGuard.ts        # Two-key session route guard
+│       └── types/
+│           └── bluetooth.d.ts         # Web Bluetooth TS augmentations
 │
 ├── PRD.md                        # Product Requirements Document
 ├── Design.md                     # System Architecture & Design
 ├── TECH_STACK.md                 # Technology Stack Reference
 ├── state.md                      # Project Status & Changelog
-├── API_REFERENCE.md              # WebSocket & REST API Reference
+├── API_REFERENCE.md              # WebSocket, REST & BLE API Reference
 ├── SETUP_GUIDE.md                # Detailed Setup & Configuration
 ├── CONTRIBUTING.md               # Contribution Guidelines
 └── README.md                     # This file
@@ -194,7 +229,7 @@ SentryOS_Project/
 | [Architecture & Design](Design.md) | System design, concurrency model, state machine, data flow |
 | [Tech Stack](TECH_STACK.md) | Technology choices with rationale |
 | [Project Status](state.md) | Implementation status, changelog, known limitations |
-| [API Reference](API_REFERENCE.md) | WebSocket protocol, REST endpoints, data contracts |
+| [API Reference](API_REFERENCE.md) | WebSocket protocol, REST endpoints, BLE API, data contracts |
 | [Setup Guide](SETUP_GUIDE.md) | Detailed installation, configuration, and troubleshooting |
 | [Contributing](CONTRIBUTING.md) | Code standards, PR workflow, development guidelines |
 
@@ -218,5 +253,5 @@ This project is developed as part of the **INT428: Artificial Intelligence Essen
 ---
 
 <div align="center">
-  <sub>Built with MediaPipe · FastAPI · Next.js · Framer Motion · Web Bluetooth</sub>
+  <sub>Built with MediaPipe · FastAPI · Next.js · Framer Motion · Bleak · Satoshi · Space Grotesk</sub>
 </div>

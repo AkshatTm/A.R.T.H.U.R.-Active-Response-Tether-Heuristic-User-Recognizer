@@ -70,6 +70,7 @@ import { PresentationModeProvider, usePresentationMode } from "@/context/Present
 import { useAuthGuard, logout } from "@/hooks/useAuthGuard";
 import { useBleAutoLogout } from "@/hooks/useBleAutoLogout";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Mock Enterprise Data
@@ -332,27 +333,36 @@ const SecurityTopBar = memo(function SecurityTopBar({
         boxShadow: "0 1px 0 0 var(--color-border-subtle)",
       }}
     >
-      {/* "S" lettermark + Wordmark */}
+      {/* Brand mark + wordmark */}
       <div className="flex items-center gap-2.5 shrink-0">
-        {/* "S" in display font — subtle pulse, no rotate */}
+        {/* PNG brand mark with crop-and-fit framing for the navbar */}
         <motion.div
           animate={{ opacity: [0.85, 1, 0.85] }}
           transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
           style={{
-            width: "24px",
+            width: "30px",
             height: "24px",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: "var(--font-display, 'Satoshi', sans-serif)",
-            fontWeight: 900,
-            fontSize: "1rem",
-            color: "var(--theme-primary)",
-            letterSpacing: "-0.05em",
-            lineHeight: 1,
+            borderRadius: "8px",
+            overflow: "hidden",
+            border: "1px solid rgba(71, 159, 255, 0.28)",
+            background: "rgba(8, 16, 26, 0.35)",
+            boxShadow: "inset 0 0 0 1px rgba(16, 30, 50, 0.55)",
+            position: "relative",
           }}
         >
-          S
+          <Image
+            src="/erasebg-transformed.png"
+            alt="A.R.T.H.U.R. logo"
+            fill
+            priority
+            sizes="30px"
+            style={{
+              objectFit: "cover",
+              objectPosition: "center 48%",
+              transform: "scale(1.16)",
+              filter: "drop-shadow(0 0 6px rgba(52, 170, 255, 0.35))",
+            }}
+          />
         </motion.div>
         {/* Satoshi Bold, mixed case — no version number */}
         <span
