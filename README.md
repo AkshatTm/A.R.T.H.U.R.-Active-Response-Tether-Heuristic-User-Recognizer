@@ -248,7 +248,7 @@ All image processing happens **in-memory only**. No frames are saved, recorded, 
 
 ## License
 
-This project is developed as part of the **INT428: Artificial Intelligence Essentials** coursework at Lovely Professional University.
+This project is developed as part of the ML coursework at Lovely Professional University.
 
 ---
 
